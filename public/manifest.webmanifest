@@ -1,0 +1,10 @@
+{
+  "name": "RoadLens Dushanbe",
+  "short_name": "RoadLens",
+  "description": "Capture, verify, and prioritize road damage.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#07100d",
+  "theme_color": "#07100d",
+  "icons": [{ "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }]
+}
