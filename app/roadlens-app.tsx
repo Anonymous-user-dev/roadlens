@@ -10,7 +10,7 @@ type Issue = {
   street: string;
   detail: string;
   severity: "Critical" | "High" | "Medium";
-  confidence: number;
+  confidence: number | null;
   confirmations: number;
   position: { x: number; y: number };
   fresh?: boolean;
@@ -63,7 +63,7 @@ export function RoadLensApp() {
           street: report.street,
           detail: report.detail,
           severity: report.severity === "Critical" || report.severity === "High" ? report.severity : "Medium",
-          confidence: report.confidence ?? 0,
+          confidence: report.confidence,
           confirmations: report.confirmations,
           position: {
             x: Math.max(4, Math.min(96, ((report.longitude - 68.73) / 0.14) * 100)),
@@ -94,6 +94,10 @@ export function RoadLensApp() {
     return () => lifecycle.abort();
   }, []);
 
+  useEffect(() => () => {
+    if (preview) URL.revokeObjectURL(preview);
+  }, [preview]);
+
   function locate() {
     setScanStep("locating");
     if (!navigator.geolocation) { setLocation("Dushanbe · approximate location"); setScanStep("ready"); return; }
@@ -106,7 +110,6 @@ export function RoadLensApp() {
 
   function selectPhoto(file?: File) {
     if (!file) return;
-    if (preview) URL.revokeObjectURL(preview);
     setPhoto(file);
     setPreview(URL.createObjectURL(file));
     setDetection(null);
@@ -124,7 +127,7 @@ export function RoadLensApp() {
       const result = await response.json() as { detections?: Array<{ confidence?: number }> };
       const best = [...(result.detections ?? [])].sort((a, b) => (b.confidence ?? 0) - (a.confidence ?? 0))[0];
       if (!best || typeof best.confidence !== "number") { setDetection(null); setScanStep("noissue"); return; }
-      const confidence = Math.round(best.confidence <= 1 ? best.confidence * 100 : best.confidence);
+      const confidence = Math.max(0, Math.min(100, Math.round(best.confidence <= 1 ? best.confidence * 100 : best.confidence)));
       const severity: Issue["severity"] = confidence >= 90 ? "Critical" : confidence >= 72 ? "High" : "Medium";
       setDetection({ confidence, severity });
       setScanStep("found");
@@ -145,7 +148,7 @@ export function RoadLensApp() {
       const response = await fetch("/api/reports", { method: "POST", body: form });
       const result = await response.json() as { report?: { id: string } };
       if (!response.ok || !result.report) { setScanStep("unavailable"); return; }
-      const issue: Issue = { id: result.report.id, street: "Current road segment", detail: detection ? "Probable pothole · model screened" : "Road damage · awaiting review", severity: detection?.severity ?? "Medium", confidence: detection?.confidence ?? 0, confirmations: 1, position: { x: Math.max(4, Math.min(96, ((coordinates.longitude - 68.73) / 0.14) * 100)), y: Math.max(4, Math.min(96, 100 - ((coordinates.latitude - 38.52) / 0.11) * 100)) }, fresh: true };
+      const issue: Issue = { id: result.report.id, street: "Current road segment", detail: detection ? "Probable pothole · model screened" : "Road damage · awaiting review", severity: detection?.severity ?? "Medium", confidence: detection?.confidence ?? null, confirmations: 1, position: { x: Math.max(4, Math.min(96, ((coordinates.longitude - 68.73) / 0.14) * 100)), y: Math.max(4, Math.min(96, 100 - ((coordinates.latitude - 38.52) / 0.11) * 100)) }, fresh: true };
       setIssues((current) => [issue, ...current]); setSelectedId(issue.id); setScanOpen(false); setScanStep("ready"); setPreview(null); setPhoto(null); setDetection(null);
     } catch { setScanStep("unavailable"); }
   }
@@ -175,14 +178,14 @@ export function RoadLensApp() {
               <button key={issue.id} className={`issue-row ${selectedId === issue.id ? "active" : ""}`} onClick={() => setSelectedId(issue.id)}>
                 <span className={`severity-icon ${severityStyle[issue.severity]}`}>{issue.severity === "Critical" ? <OctagonAlert /> : <CircleAlert />}</span>
                 <span className="issue-copy"><strong>{issue.street}</strong><small>{issue.detail}</small></span>
-                <span className="issue-score">{issue.confidence}%<small>{issue.confirmations} confirms</small></span>
+                <span className="issue-score">{issue.confidence === null ? "Review" : `${issue.confidence}%`}<small>{issue.confirmations} confirms</small></span>
               </button>
             ))}
           </div>
         </aside>
 
         <section className="map-panel" aria-label="Dushanbe road issue map">
-          <div className="map-toolbar"><div className="map-tabs"><button className={mapMode === "live" ? "active" : ""} onClick={() => setMapMode("live")}><Map /> Live map</button><button className={mapMode === "route" ? "active" : ""} onClick={() => setMapMode("route")}><Route /> Inspection route</button></div><button className="map-action" onClick={() => setSelectedId(issues[0].id)}><LocateFixed /> Center map</button></div>
+          <div className="map-toolbar"><div className="map-tabs"><button className={mapMode === "live" ? "active" : ""} onClick={() => setMapMode("live")}><Map /> Live map</button><button className={mapMode === "route" ? "active" : ""} onClick={() => setMapMode("route")}><Route /> Inspection route</button></div><button className="map-action" onClick={() => setSelectedId(issues[0].id)}><LocateFixed /> Focus priority</button></div>
           <div className="map-canvas">
             <div className="map-grid" />
             <svg className="road-network" viewBox="0 0 1000 700" preserveAspectRatio="none" aria-hidden="true">
@@ -196,7 +199,7 @@ export function RoadLensApp() {
           </div>
           <article className="issue-detail">
             <div className="detail-main"><span className={`severity-badge ${severityStyle[selected.severity]}`}>{selected.severity}</span><div><small>{selected.id}</small><h2>{selected.street}</h2><p>{selected.detail}</p></div></div>
-            <div className="confidence-ring" style={{ "--score": `${selected.confidence * 3.6}deg` } as React.CSSProperties}><span>{selected.confidence}%</span><small>confidence</small></div>
+            <div className="confidence-ring" style={{ "--score": `${(selected.confidence ?? 0) * 3.6}deg` } as React.CSSProperties}><span>{selected.confidence === null ? "Review" : `${selected.confidence}%`}</span><small>{selected.confidence === null ? "pending" : "confidence"}</small></div>
             <div className="verification"><ShieldCheck /><span><strong>{selected.confirmations} independent passes</strong><small>Last seen 8 min ago</small></span></div>
             <Button className="route-button" onClick={() => setMapMode("route")}><Navigation /> Plan inspection</Button>
           </article>

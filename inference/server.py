@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import io
+import hashlib
 import os
+import threading
 import time
 import urllib.request
 from pathlib import Path
@@ -16,6 +18,7 @@ MODEL_URL = os.getenv(
     "https://huggingface.co/peterhdd/pothole-detection-yolov8/resolve/main/best.onnx",
 )
 MODEL_PATH = Path(os.getenv("MODEL_PATH", Path(__file__).with_name("best.onnx")))
+MODEL_SHA256 = os.getenv("MODEL_SHA256", "91dd7de7a110c61314ea19a958fcc85c7b3461cc6d60d87fefc08b41ac6e32c5").lower()
 API_KEY = os.getenv("INFERENCE_API_KEY", "")
 CONFIDENCE_THRESHOLD = float(os.getenv("CONFIDENCE_THRESHOLD", "0.35"))
 IOU_THRESHOLD = float(os.getenv("IOU_THRESHOLD", "0.55"))
@@ -24,22 +27,41 @@ INPUT_SIZE = 640
 
 app = FastAPI(title="RoadLens detector", version="0.1.0")
 session: ort.InferenceSession | None = None
+session_lock = threading.Lock()
+Image.MAX_IMAGE_PIXELS = 25_000_000
+
+
+def model_checksum(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as model_file:
+        for chunk in iter(lambda: model_file.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def ensure_model() -> Path:
     if MODEL_PATH.exists() and MODEL_PATH.stat().st_size > 1_000_000:
+        if MODEL_SHA256 and model_checksum(MODEL_PATH) != MODEL_SHA256:
+            raise RuntimeError("Model checksum mismatch")
         return MODEL_PATH
     MODEL_PATH.parent.mkdir(parents=True, exist_ok=True)
     temporary = MODEL_PATH.with_suffix(".download")
-    urllib.request.urlretrieve(MODEL_URL, temporary)
-    temporary.replace(MODEL_PATH)
+    try:
+        urllib.request.urlretrieve(MODEL_URL, temporary)
+        if MODEL_SHA256 and model_checksum(temporary) != MODEL_SHA256:
+            raise RuntimeError("Downloaded model checksum mismatch")
+        temporary.replace(MODEL_PATH)
+    finally:
+        temporary.unlink(missing_ok=True)
     return MODEL_PATH
 
 
 def get_session() -> ort.InferenceSession:
     global session
     if session is None:
-        session = ort.InferenceSession(str(ensure_model()), providers=["CPUExecutionProvider"])
+        with session_lock:
+            if session is None:
+                session = ort.InferenceSession(str(ensure_model()), providers=["CPUExecutionProvider"])
     return session
 
 
@@ -132,7 +154,7 @@ async def detect(image: UploadFile = File(...), authorization: str | None = Head
     try:
         source = Image.open(io.BytesIO(content))
         tensor, original, transform = prepare_image(source)
-    except (UnidentifiedImageError, OSError) as error:
+    except (UnidentifiedImageError, OSError, Image.DecompressionBombError) as error:
         raise HTTPException(status_code=422, detail="Unreadable image") from error
 
     started = time.perf_counter()
