@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import { Camera, Check, ChevronRight, CircleAlert, Crosshair, LocateFixed, Map, Navigation, OctagonAlert, Route, ShieldCheck, Sparkles, WifiOff, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -34,10 +34,37 @@ export function RoadLensApp() {
   const [location, setLocation] = useState("Location not captured");
   const [coordinates, setCoordinates] = useState<{ latitude: number; longitude: number } | null>(null);
   const [detection, setDetection] = useState<{ confidence: number; severity: Issue["severity"] } | null>(null);
+  const [fileError, setFileError] = useState<string | null>(null);
+  const [storageReady, setStorageReady] = useState<boolean | null>(null);
   const [offline, setOffline] = useState(false);
   const [mapMode, setMapMode] = useState<"live" | "route">("live");
   const fileRef = useRef<HTMLInputElement>(null);
+  const analysisRun = useRef(0);
+  const locationRun = useRef(0);
   const selected = useMemo(() => issues.find((issue) => issue.id === selectedId) ?? issues[0], [issues, selectedId]);
+
+  const resetScan = useCallback(() => {
+    analysisRun.current += 1;
+    locationRun.current += 1;
+    setScanStep("ready");
+    setPreview(null);
+    setPhoto(null);
+    setLocation("Location not captured");
+    setCoordinates(null);
+    setDetection(null);
+    setFileError(null);
+    if (fileRef.current) fileRef.current.value = "";
+  }, []);
+
+  const openScan = useCallback(() => {
+    resetScan();
+    setScanOpen(true);
+  }, [resetScan]);
+
+  const closeScan = useCallback(() => {
+    setScanOpen(false);
+    resetScan();
+  }, [resetScan]);
 
   useEffect(() => {
     const update = () => setOffline(!navigator.onLine);
@@ -54,26 +81,32 @@ export function RoadLensApp() {
 
   useEffect(() => {
     let active = true;
-    fetch("/api/reports")
-      .then((response) => response.ok ? response.json() : Promise.reject())
-      .then((payload: { reports?: Array<{ id: string; street: string; detail: string; severity: string; confidence: number | null; confirmations: number; latitude: number; longitude: number }> }) => {
-        if (!active || !payload.reports?.length) return;
-        const saved = payload.reports.map((report): Issue => ({
-          id: report.id,
-          street: report.street,
-          detail: report.detail,
-          severity: report.severity === "Critical" || report.severity === "High" ? report.severity : "Medium",
-          confidence: report.confidence,
-          confirmations: report.confirmations,
-          position: {
-            x: Math.max(4, Math.min(96, ((report.longitude - 68.73) / 0.14) * 100)),
-            y: Math.max(4, Math.min(96, 100 - ((report.latitude - 38.52) / 0.11) * 100)),
-          },
-        }));
-        setIssues((current) => [...saved, ...current.filter((sample) => !saved.some((report) => report.id === sample.id))]);
-      })
-      .catch(() => undefined);
-    return () => { active = false; };
+    const loadReports = () => {
+      fetch("/api/reports")
+        .then((response) => response.ok ? response.json() : Promise.reject())
+        .then((payload: { reports?: Array<{ id: string; street: string; detail: string; severity: string; confidence: number | null; confirmations: number; latitude: number; longitude: number }> }) => {
+          if (!active) return;
+          setStorageReady(true);
+          if (!payload.reports?.length) return;
+          const saved = payload.reports.map((report): Issue => ({
+            id: report.id,
+            street: report.street,
+            detail: report.detail,
+            severity: report.severity === "Critical" || report.severity === "High" ? report.severity : "Medium",
+            confidence: report.confidence,
+            confirmations: report.confirmations,
+            position: {
+              x: Math.max(4, Math.min(96, ((report.longitude - 68.73) / 0.14) * 100)),
+              y: Math.max(4, Math.min(96, 100 - ((report.latitude - 38.52) / 0.11) * 100)),
+            },
+          }));
+          setIssues((current) => [...saved, ...current.filter((sample) => !saved.some((report) => report.id === sample.id))]);
+        })
+        .catch(() => { if (active) setStorageReady(false); });
+    };
+    loadReports();
+    window.addEventListener("online", loadReports);
+    return () => { active = false; window.removeEventListener("online", loadReports); };
   }, []);
 
   useEffect(() => {
@@ -88,41 +121,70 @@ export function RoadLensApp() {
       annotations: { readOnlyHint: false, untrustedContentHint: false },
       execute: async (input: unknown) => {
         if (typeof input !== "object" || input === null || Array.isArray(input) || Object.keys(input).length) throw new Error("start_road_scan accepts an empty object");
-        setScanOpen(true); setScanStep("ready"); return { status: "capture_ready" };
+        openScan(); return { status: "capture_ready" };
       },
     }, { signal: lifecycle.signal })).catch(() => undefined);
     return () => lifecycle.abort();
-  }, []);
+  }, [openScan]);
 
   useEffect(() => () => {
     if (preview) URL.revokeObjectURL(preview);
   }, [preview]);
 
+  useEffect(() => {
+    if (!scanOpen) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") closeScan();
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [scanOpen, closeScan]);
+
   function locate() {
+    const run = ++locationRun.current;
     setScanStep("locating");
     if (!navigator.geolocation) { setLocation("Dushanbe · approximate location"); setScanStep("ready"); return; }
     navigator.geolocation.getCurrentPosition(
-      ({ coords }) => { setCoordinates({ latitude: coords.latitude, longitude: coords.longitude }); setLocation(`${coords.latitude.toFixed(5)}, ${coords.longitude.toFixed(5)}`); setScanStep("ready"); },
-      () => { setCoordinates(null); setLocation("Location permission is needed to submit"); setScanStep("ready"); },
+      ({ coords }) => { if (run !== locationRun.current) return; setCoordinates({ latitude: coords.latitude, longitude: coords.longitude }); setLocation(`${coords.latitude.toFixed(5)}, ${coords.longitude.toFixed(5)}`); setScanStep("ready"); },
+      () => { if (run !== locationRun.current) return; setCoordinates(null); setLocation("Location permission is needed to submit"); setScanStep("ready"); },
       { enableHighAccuracy: true, timeout: 8000 },
     );
   }
 
   function selectPhoto(file?: File) {
     if (!file) return;
+    analysisRun.current += 1;
+    locationRun.current += 1;
+    setScanStep("ready");
+    setPhoto(null);
+    setPreview(null);
+    setCoordinates(null);
+    setLocation("Location not captured");
+    setDetection(null);
+    const supportedTypes = new Set(["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"]);
+    if (!supportedTypes.has(file.type.toLowerCase())) {
+      setFileError("Use a JPEG, PNG, WebP, HEIC, or HEIF photo.");
+      return;
+    }
+    if (file.size === 0 || file.size > 8_000_000) {
+      setFileError("The photo must be smaller than 8 MB.");
+      return;
+    }
+    setFileError(null);
     setPhoto(file);
     setPreview(URL.createObjectURL(file));
-    setDetection(null);
     locate();
   }
 
   async function analyze() {
     if (!photo) return;
+    const run = ++analysisRun.current;
     setScanStep("analyzing");
     const form = new FormData();
     form.set("image", photo);
     try {
       const response = await fetch("/api/analyze", { method: "POST", body: form });
+      if (run !== analysisRun.current) return;
       if (!response.ok) { setScanStep("unavailable"); return; }
       const result = await response.json() as { detections?: Array<{ confidence?: number }> };
       const best = [...(result.detections ?? [])].sort((a, b) => (b.confidence ?? 0) - (a.confidence ?? 0))[0];
@@ -131,7 +193,7 @@ export function RoadLensApp() {
       const severity: Issue["severity"] = confidence >= 90 ? "Critical" : confidence >= 72 ? "High" : "Medium";
       setDetection({ confidence, severity });
       setScanStep("found");
-    } catch { setScanStep("unavailable"); }
+    } catch { if (run === analysisRun.current) setScanStep("unavailable"); }
   }
 
   async function saveDetection() {
@@ -147,18 +209,18 @@ export function RoadLensApp() {
     try {
       const response = await fetch("/api/reports", { method: "POST", body: form });
       const result = await response.json() as { report?: { id: string } };
-      if (!response.ok || !result.report) { setScanStep("unavailable"); return; }
+      if (!response.ok || !result.report) { if (response.status >= 500) setStorageReady(false); setScanStep("unavailable"); return; }
       const issue: Issue = { id: result.report.id, street: "Current road segment", detail: detection ? "Probable pothole · model screened" : "Road damage · awaiting review", severity: detection?.severity ?? "Medium", confidence: detection?.confidence ?? null, confirmations: 1, position: { x: Math.max(4, Math.min(96, ((coordinates.longitude - 68.73) / 0.14) * 100)), y: Math.max(4, Math.min(96, 100 - ((coordinates.latitude - 38.52) / 0.11) * 100)) }, fresh: true };
-      setIssues((current) => [issue, ...current]); setSelectedId(issue.id); setScanOpen(false); setScanStep("ready"); setPreview(null); setPhoto(null); setDetection(null);
-    } catch { setScanStep("unavailable"); }
+      setStorageReady(true); setIssues((current) => [issue, ...current]); setSelectedId(issue.id); closeScan();
+    } catch { setStorageReady(false); setScanStep("unavailable"); }
   }
 
   return (
     <main className="app-shell">
       <header className="topbar">
         <div className="brand" aria-label="RoadLens home"><span className="brand-mark"><Route aria-hidden="true" /></span><span>RoadLens</span><span className="city-label">DUSHANBE</span></div>
-        <div className="topbar-center"><span className="live-dot" /><span>Prototype network ready</span><span className="signal-meta">3 sample reports</span></div>
-        <div className="topbar-actions">{offline && <span className="offline-pill"><WifiOff /> Offline · submission paused</span>}<Button className="scan-button" onClick={() => setScanOpen(true)}><Camera /> Start road scan</Button></div>
+        <div className="topbar-center"><span className={`live-dot ${storageReady === false ? "warning" : ""}`} /><span>{storageReady === false ? "Reporting temporarily unavailable" : storageReady === null ? "Checking report network…" : "Road reporting active"}</span><span className="signal-meta">{issues.length} visible reports</span></div>
+        <div className="topbar-actions">{offline && <span className="offline-pill"><WifiOff /> Offline · submission paused</span>}<Button className="scan-button" onClick={openScan}><Camera /> Start road scan</Button></div>
       </header>
 
       <section className="workspace">
@@ -206,11 +268,12 @@ export function RoadLensApp() {
         </section>
       </section>
 
-      {scanOpen && <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && setScanOpen(false)}>
+      {scanOpen && <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && closeScan()}>
         <section className="scan-modal" role="dialog" aria-modal="true" aria-labelledby="scan-title">
-          <div className="scan-head"><div><span className="eyebrow"><Sparkles /> New observation</span><h2 id="scan-title">Scan road damage</h2></div><button className="icon-button" onClick={() => setScanOpen(false)} aria-label="Close"><X /></button></div>
+          <div className="scan-head"><div><span className="eyebrow"><Sparkles /> New observation</span><h2 id="scan-title">Scan road damage</h2></div><button className="icon-button" onClick={closeScan} aria-label="Close"><X /></button></div>
           {!preview ? <button className="capture-zone" onClick={() => fileRef.current?.click()}><span className="capture-icon"><Camera /></span><strong>Take a clear road photo</strong><small>Keep the damaged area centered and avoid people or license plates.</small></button> : <div className="photo-preview"><Image src={preview} alt="Road damage awaiting analysis" fill unoptimized /><button onClick={() => fileRef.current?.click()}>Retake</button></div>}
-          <input ref={fileRef} hidden type="file" accept="image/*" capture="environment" onChange={(event) => selectPhoto(event.target.files?.[0])} />
+          <input ref={fileRef} hidden type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" capture="environment" onChange={(event) => { const file = event.currentTarget.files?.[0]; event.currentTarget.value = ""; selectPhoto(file); }} />
+          {fileError && <div className="result-card warning"><span><CircleAlert /></span><div><strong>Photo cannot be used</strong><small>{fileError}</small></div></div>}
           <div className="location-row"><LocateFixed /><div><strong>{scanStep === "locating" ? "Finding your location…" : location}</strong><small>Coordinates are attached only to this road report.</small></div><button onClick={locate}>Refresh</button></div>
           {scanStep === "analyzing" && <div className="analysis-state"><span className="scanner" /><div><strong>Inspecting road surface</strong><small>Checking shape, depth cues, and pavement boundaries…</small></div></div>}
           {scanStep === "found" && detection && <div className="result-card"><span><Check /></span><div><strong>Probable pothole detected</strong><small>{detection.severity} priority · {detection.confidence}% model confidence · review recommended</small></div></div>}

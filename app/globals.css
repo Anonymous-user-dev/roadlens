@@ -111,6 +111,7 @@ button { font: inherit; }
 .city-label { padding: 4px 7px; border: 1px solid #355043; border-radius: 5px; color: #8fa69a; font-size: 10px; letter-spacing: .13em; }
 .topbar-center { color: #c1d0c7; font-size: 13px; display: flex; gap: 8px; align-items: center; }
 .live-dot { width: 7px; height: 7px; border-radius: 50%; background: #b7f451; box-shadow: 0 0 0 5px rgba(183,244,81,.1); }
+.live-dot.warning { background: #ffb95f; box-shadow: 0 0 0 5px rgba(255,185,95,.1); }
 .signal-meta { color: #71877b; padding-left: 8px; border-left: 1px solid #2b3a33; }
 .topbar-actions { justify-self: end; display: flex; align-items: center; gap: 10px; }
 .scan-button, .route-button { border-radius: 10px !important; background: #b7f451 !important; color: #0b140f !important; box-shadow: 0 8px 25px rgba(183,244,81,.12); font-weight: 760 !important; }

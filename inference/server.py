@@ -6,19 +6,20 @@ import os
 import threading
 import time
 import urllib.request
+import warnings
 from pathlib import Path
 
 import numpy as np
 import onnxruntime as ort
 from fastapi import FastAPI, File, Header, HTTPException, UploadFile
 from PIL import Image, ImageOps, UnidentifiedImageError
+from pillow_heif import register_heif_opener
 
-MODEL_URL = os.getenv(
-    "MODEL_URL",
-    "https://huggingface.co/peterhdd/pothole-detection-yolov8/resolve/main/best.onnx",
-)
+DEFAULT_MODEL_URL = "https://huggingface.co/peterhdd/pothole-detection-yolov8/resolve/main/best.onnx"
+DEFAULT_MODEL_SHA256 = "91dd7de7a110c61314ea19a958fcc85c7b3461cc6d60d87fefc08b41ac6e32c5"
+MODEL_URL = os.getenv("MODEL_URL", DEFAULT_MODEL_URL)
 MODEL_PATH = Path(os.getenv("MODEL_PATH", Path(__file__).with_name("best.onnx")))
-MODEL_SHA256 = os.getenv("MODEL_SHA256", "91dd7de7a110c61314ea19a958fcc85c7b3461cc6d60d87fefc08b41ac6e32c5").lower()
+MODEL_SHA256 = os.getenv("MODEL_SHA256", DEFAULT_MODEL_SHA256 if MODEL_URL == DEFAULT_MODEL_URL else "").lower()
 API_KEY = os.getenv("INFERENCE_API_KEY", "")
 CONFIDENCE_THRESHOLD = float(os.getenv("CONFIDENCE_THRESHOLD", "0.35"))
 IOU_THRESHOLD = float(os.getenv("IOU_THRESHOLD", "0.55"))
@@ -29,6 +30,8 @@ app = FastAPI(title="RoadLens detector", version="0.1.0")
 session: ort.InferenceSession | None = None
 session_lock = threading.Lock()
 Image.MAX_IMAGE_PIXELS = 25_000_000
+warnings.simplefilter("error", Image.DecompressionBombWarning)
+register_heif_opener()
 
 
 def model_checksum(path: Path) -> str:
@@ -154,7 +157,7 @@ async def detect(image: UploadFile = File(...), authorization: str | None = Head
     try:
         source = Image.open(io.BytesIO(content))
         tensor, original, transform = prepare_image(source)
-    except (UnidentifiedImageError, OSError, Image.DecompressionBombError) as error:
+    except (UnidentifiedImageError, OSError, Image.DecompressionBombError, Image.DecompressionBombWarning) as error:
         raise HTTPException(status_code=422, detail="Unreadable image") from error
 
     started = time.perf_counter()

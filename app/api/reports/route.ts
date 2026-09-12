@@ -4,6 +4,7 @@ import { getRawDb } from "@/db";
 export const runtime = "edge";
 
 const allowedSeverities = new Set(["Critical", "High", "Medium"]);
+const supportedImageTypes = new Set(["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"]);
 
 export async function GET() {
   try {
@@ -34,7 +35,7 @@ export async function POST(request: Request) {
   const image = form.get("image");
   if (!Number.isFinite(latitude) || !Number.isFinite(longitude) || latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180) return Response.json({ error: "A valid location is required." }, { status: 422 });
   if (confidence !== null && (!Number.isFinite(confidence) || confidence < 0 || confidence > 100)) return Response.json({ error: "Confidence must be between 0 and 100." }, { status: 422 });
-  if (!(image instanceof File) || !image.type.startsWith("image/") || image.size === 0 || image.size > 8_000_000) return Response.json({ error: "Attach a road image smaller than 8 MB." }, { status: 422 });
+  if (!(image instanceof File) || !supportedImageTypes.has(image.type.toLowerCase()) || image.size === 0 || image.size > 8_000_000) return Response.json({ error: "Attach a JPEG, PNG, WebP, HEIC, or HEIF road image smaller than 8 MB." }, { status: 422 });
 
   const id = `RL-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
   const imageKey = `reports/${id}/${crypto.randomUUID()}`;
