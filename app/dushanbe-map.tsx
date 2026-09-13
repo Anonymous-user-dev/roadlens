@@ -15,13 +15,14 @@ type DushanbeMapProps = {
   issues: MapIssue[];
   selectedId: string | null;
   mode: "live" | "route";
+  viewCommand: { kind: "city" | "priority" | "route"; sequence: number };
   onSelect: (id: string) => void;
 };
 
 const DUSHANBE_CENTER: L.LatLngExpression = [38.5737, 68.7738];
 const DUSHANBE_BOUNDS = L.latLngBounds([38.39, 68.53], [38.78, 69.04]);
 
-export function DushanbeMap({ issues, selectedId, mode, onSelect }: DushanbeMapProps) {
+export function DushanbeMap({ issues, selectedId, mode, viewCommand, onSelect }: DushanbeMapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
   const reportLayersRef = useRef<L.Layer[]>([]);
@@ -92,9 +93,35 @@ export function DushanbeMap({ issues, selectedId, mode, onSelect }: DushanbeMapP
         .addTo(map);
     });
     if (mode === "route" && issues.length > 1) {
-      reportLayersRef.current.push(L.polyline(issues.map((issue) => [issue.coordinates.latitude, issue.coordinates.longitude]), { color: "#79a83b", weight: 5, opacity: 0.9, dashArray: "9 9" }).addTo(map));
+      reportLayersRef.current.push(L.polyline(issues.map((issue) => [issue.coordinates.latitude, issue.coordinates.longitude]), { color: "#4d9df7", weight: 5, opacity: 0.92, dashArray: "9 9" }).addTo(map));
+    } else if (mode === "route" && issues.length === 1) {
+      reportLayersRef.current.push(L.circle([issues[0].coordinates.latitude, issues[0].coordinates.longitude], { radius: 180, color: "#4d9df7", weight: 3, fillColor: "#4d9df7", fillOpacity: 0.12 }).addTo(map));
     }
   }, [issues, mode, onSelect, ready, selectedId]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready) return;
+    map.stop();
+    if (containerRef.current) {
+      containerRef.current.dataset.view = viewCommand.kind;
+      containerRef.current.dataset.viewSequence = String(viewCommand.sequence);
+    }
+    if (viewCommand.kind === "city") {
+      map.flyTo(DUSHANBE_CENTER, 12, { duration: 0.65 });
+      return;
+    }
+    if (viewCommand.kind === "priority") {
+      const target = issues.find((issue) => issue.id === selectedId) ?? issues[0];
+      if (target) map.flyTo([target.coordinates.latitude, target.coordinates.longitude], 16, { duration: 0.65 });
+      return;
+    }
+    if (issues.length > 1) {
+      map.flyToBounds(L.latLngBounds(issues.map((issue) => [issue.coordinates.latitude, issue.coordinates.longitude])), { padding: [65, 65], maxZoom: 15, duration: 0.65 });
+    } else if (issues.length === 1) {
+      map.flyTo([issues[0].coordinates.latitude, issues[0].coordinates.longitude], 15, { duration: 0.65 });
+    }
+  }, [issues, ready, selectedId, viewCommand]);
 
   const locateUser = useCallback(() => {
     const map = mapRef.current;

@@ -21,7 +21,7 @@ MODEL_URL = os.getenv("MODEL_URL", DEFAULT_MODEL_URL)
 MODEL_PATH = Path(os.getenv("MODEL_PATH", Path(__file__).with_name("best.onnx")))
 MODEL_SHA256 = os.getenv("MODEL_SHA256", DEFAULT_MODEL_SHA256 if MODEL_URL == DEFAULT_MODEL_URL else "").lower()
 API_KEY = os.getenv("INFERENCE_API_KEY", "")
-CONFIDENCE_THRESHOLD = float(os.getenv("CONFIDENCE_THRESHOLD", "0.15"))
+CONFIDENCE_THRESHOLD = float(os.getenv("CONFIDENCE_THRESHOLD", "0.30"))
 IOU_THRESHOLD = float(os.getenv("IOU_THRESHOLD", "0.55"))
 MAX_UPLOAD_BYTES = 8_000_000
 INPUT_SIZE = 640
@@ -32,6 +32,7 @@ CLASS_NAMES = (
     "pothole",
     "other road damage",
 )
+CLASS_CONFIDENCE_FLOORS = np.asarray((0.35, 0.35, 0.40, 0.45, 0.60), dtype=np.float32)
 
 app = FastAPI(title="RoadLens detector", version="0.1.0")
 session: ort.InferenceSession | None = None
@@ -124,7 +125,10 @@ def decode(output: np.ndarray, original: tuple[int, int], transform: tuple[float
         raise RuntimeError(f"Expected {len(CLASS_NAMES)} model classes, got {class_scores.shape[1]}")
     class_ids = class_scores.argmax(axis=1)
     scores = class_scores.max(axis=1)
-    accepted = scores >= CONFIDENCE_THRESHOLD
+    # The global threshold can be raised by configuration, but never lowered below
+    # the per-class precision floors. This prevents weak crack/"other" matches from
+    # being presented as reliable road defects.
+    accepted = scores >= np.maximum(CONFIDENCE_THRESHOLD, CLASS_CONFIDENCE_FLOORS[class_ids])
     rows = predictions[accepted]
     scores = scores[accepted]
     class_ids = class_ids[accepted]

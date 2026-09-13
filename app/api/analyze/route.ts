@@ -3,8 +3,15 @@ import { env } from "cloudflare:workers";
 export const runtime = "edge";
 
 const supportedImageTypes = new Set(["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"]);
+const confidenceFloors: Record<string, number> = {
+  "longitudinal crack": 0.35,
+  "transverse crack": 0.35,
+  "alligator crack": 0.40,
+  pothole: 0.45,
+  "other road damage": 0.60,
+};
 
-type DetectorResponse = { detections: Array<{ confidence: number; label?: string; box?: number[] }> };
+type DetectorResponse = { detections: Array<{ confidence: number; label?: string; box?: number[] }>; image?: { width: number; height: number }; durationMs?: number };
 
 function normalizeDetectorResponse(value: unknown): DetectorResponse | null {
   if (!value || typeof value !== "object" || !("detections" in value) || !Array.isArray(value.detections)) return null;
@@ -12,10 +19,16 @@ function normalizeDetectorResponse(value: unknown): DetectorResponse | null {
     if (!candidate || typeof candidate !== "object" || !("confidence" in candidate) || typeof candidate.confidence !== "number" || !Number.isFinite(candidate.confidence)) return [];
     const confidence = Math.max(0, Math.min(1, candidate.confidence > 1 ? candidate.confidence / 100 : candidate.confidence));
     const label = "label" in candidate && typeof candidate.label === "string" ? candidate.label.slice(0, 40) : undefined;
+    const requiredConfidence = confidenceFloors[label?.toLowerCase() ?? ""] ?? 0.60;
+    if (confidence < requiredConfidence) return [];
     const box = "box" in candidate && Array.isArray(candidate.box) && candidate.box.length === 4 && candidate.box.every((coordinate: unknown) => typeof coordinate === "number" && Number.isFinite(coordinate)) ? candidate.box : undefined;
     return [{ confidence, label, box }];
   });
-  return { detections };
+  const image = "image" in value && value.image && typeof value.image === "object" && "width" in value.image && "height" in value.image && typeof value.image.width === "number" && typeof value.image.height === "number" && value.image.width > 0 && value.image.height > 0
+    ? { width: value.image.width, height: value.image.height }
+    : undefined;
+  const durationMs = "duration_ms" in value && typeof value.duration_ms === "number" && Number.isFinite(value.duration_ms) ? Math.max(0, value.duration_ms) : undefined;
+  return { detections, image, durationMs };
 }
 
 export async function POST(request: Request) {
