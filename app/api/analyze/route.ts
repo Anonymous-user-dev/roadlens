@@ -27,7 +27,7 @@ export async function POST(request: Request) {
   const outgoing = new FormData();
   outgoing.set("image", image);
   try {
-    const response = await fetch(`${env.INFERENCE_API_URL.replace(/\/$/, "")}/detect`, { method: "POST", headers: env.INFERENCE_API_KEY ? { Authorization: `Bearer ${env.INFERENCE_API_KEY}` } : undefined, body: outgoing, signal: AbortSignal.timeout(20_000) });
+    const response = await fetch(`${env.INFERENCE_API_URL.replace(/\/$/, "")}/detect`, { method: "POST", headers: env.INFERENCE_API_KEY ? { Authorization: `Bearer ${env.INFERENCE_API_KEY}` } : undefined, body: outgoing, signal: AbortSignal.timeout(60_000) });
     if (!response.ok) throw new Error(`Detector returned ${response.status}`);
     const result = normalizeDetectorResponse(await response.json());
     if (!result) throw new Error("Detector returned an invalid response");
