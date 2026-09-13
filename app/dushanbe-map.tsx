@@ -19,6 +19,8 @@ type DushanbeMapProps = {
   onSelect: (id: string) => void;
 };
 
+// FRONTEND EDIT: Initial map position and allowed pan area. Coordinates are [latitude, longitude].
+// Keep these bounds aligned with lib/dushanbe.ts so the UI and API accept the same city area.
 const DUSHANBE_CENTER: L.LatLngExpression = [38.5737, 68.7738];
 const DUSHANBE_BOUNDS = L.latLngBounds([38.39, 68.53], [38.78, 69.04]);
 
@@ -31,13 +33,14 @@ export function DushanbeMap({ issues, selectedId, mode, viewCommand, onSelect }:
   const [ready, setReady] = useState(false);
   const [locating, setLocating] = useState(false);
   const [mapError, setMapError] = useState<string | null>(null);
-  const [routeStatus, setRouteStatus] = useState<string | null>(null);
+  const [routeStatus, setRouteStatus] = useState<{ key: string; label: string } | null>(null);
+  const routeKey = mode === "route" ? issues.map((issue) => `${issue.id}:${issue.coordinates.latitude}:${issue.coordinates.longitude}`).join("|") : "";
 
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
     const map = L.map(containerRef.current, {
       center: DUSHANBE_CENTER,
-      zoom: 12,
+      zoom: 12, // FRONTEND EDIT: Increase for a closer view; decrease to show more of the city.
       minZoom: 9,
       maxZoom: 19,
       maxBounds: DUSHANBE_BOUNDS,
@@ -127,11 +130,11 @@ export function DushanbeMap({ issues, selectedId, mode, viewCommand, onSelect }:
       .then((route) => {
         if (controller.signal.aborted) return;
         routeLayersRef.current = [L.polyline(route.coordinates, { color: "#4d9df7", weight: 6, opacity: 0.92 }).addTo(map)];
-        setRouteStatus(`${(route.distanceMeters / 1000).toFixed(1)} km · about ${Math.max(1, Math.round(route.durationSeconds / 60))} min`);
+        setRouteStatus({ key: routeKey, label: `${(route.distanceMeters / 1000).toFixed(1)} km · about ${Math.max(1, Math.round(route.durationSeconds / 60))} min` });
       })
-      .catch(() => { if (!controller.signal.aborted) { routeLayersRef.current = [L.polyline(issues.map((issue) => [issue.coordinates.latitude, issue.coordinates.longitude]), { color: "#4d9df7", weight: 4, opacity: 0.8, dashArray: "8 8" }).addTo(map)]; setRouteStatus("Road routing unavailable · showing direct order"); } });
+      .catch(() => { if (!controller.signal.aborted) { routeLayersRef.current = [L.polyline(issues.map((issue) => [issue.coordinates.latitude, issue.coordinates.longitude]), { color: "#4d9df7", weight: 4, opacity: 0.8, dashArray: "8 8" }).addTo(map)]; setRouteStatus({ key: routeKey, label: "Road routing unavailable · showing direct order" }); } });
     return () => controller.abort();
-  }, [issues, mode, ready]);
+  }, [issues, mode, ready, routeKey]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -170,6 +173,6 @@ export function DushanbeMap({ issues, selectedId, mode, viewCommand, onSelect }:
     <div className="real-map" ref={containerRef} />
     <button type="button" className={`leaflet-location-control ${locating ? "locating" : ""}`} onClick={locateUser} aria-label="Find my location" title="Find my location">◎</button>
     {mapError && <div className="map-load-error">{mapError}</div>}
-    {mode === "route" && issues.length > 0 && <div className="route-engine-status">{issues.length === 1 ? "One inspection stop" : routeStatus || "Calculating road route…"}</div>}
+    {mode === "route" && issues.length > 0 && <div className="route-engine-status">{issues.length === 1 ? "One inspection stop" : routeStatus?.key === routeKey ? routeStatus.label : "Calculating road route…"}</div>}
   </div>;
 }

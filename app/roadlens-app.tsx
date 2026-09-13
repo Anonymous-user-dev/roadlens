@@ -46,6 +46,8 @@ type Detection = {
 type LocationSource = "gps" | "approximate";
 
 const DUSHANBE_FALLBACK = { latitude: 38.5737, longitude: 68.7738 };
+// FRONTEND EDIT: Upload labels and accepted file types are shown in the scan modal below.
+// Keep this validation list aligned with the two file inputs and the API before adding a format.
 const supportedImageTypes = new Set(["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"]);
 const imageTypesByExtension: Record<string, string> = {
   jpeg: "image/jpeg", jpg: "image/jpeg", png: "image/png", webp: "image/webp", heic: "image/heic", heif: "image/heif",
@@ -110,6 +112,7 @@ export function RoadLensApp() {
     const rank = { Critical: 0, High: 1, Medium: 2 };
     return rank[a.severity] - rank[b.severity] || new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
   }), [mapIssues]);
+  const activeRouteIssues = routeIssues.slice(0, 12);
   const priorityIssue = routeIssues[0] ?? mapIssues[0] ?? null;
 
   function commandMap(kind: "city" | "priority" | "route" | "heatmap") {
@@ -118,7 +121,7 @@ export function RoadLensApp() {
       if (priorityIssue) setSelectedId(priorityIssue.id);
       setMapNotice(priorityIssue ? `Focused on ${priorityIssue.severity.toLowerCase()} priority ${priorityIssue.id}` : "No mapped reports to focus on");
     }
-    if (kind === "route") { setMapMode("route"); setMapNotice(routeIssues.length ? `Inspection route ready · ${routeIssues.length} ${routeIssues.length === 1 ? "stop" : "stops"}` : "No verified locations available for routing"); }
+    if (kind === "route") { setMapMode("route"); setMapNotice(activeRouteIssues.length ? `Inspection route ready · ${activeRouteIssues.length}${routeIssues.length > activeRouteIssues.length ? ` of ${routeIssues.length}` : ""} ${activeRouteIssues.length === 1 ? "stop" : "stops"}` : "No verified locations available for routing"); }
     if (kind === "heatmap") { setMapMode("heatmap"); setMapNotice("Showing damage concentration across Dushanbe"); }
     setMapCommand((current) => ({ kind, sequence: current.sequence + 1 }));
   }
@@ -429,6 +432,9 @@ export function RoadLensApp() {
 
   return (
     <main className="app-shell">
+      {/* BEGINNER SYNTAX: This is JSX. <header> opens an element and </header> closes it.
+          className connects an element to CSS; values inside {braces} are JavaScript. */}
+      {/* FRONTEND EDIT: Top navigation. Move or remove items inside .topbar-actions as needed. */}
       <header className="topbar">
         <div className="brand" aria-label="RoadLens home"><span className="brand-mark"><Route aria-hidden="true" /></span><span>RoadLens</span><span className="city-label">DUSHANBE</span></div>
         <div className="topbar-center"><span className={`live-dot ${storageReady === false ? "warning" : ""}`} /><span>{storageReady === false ? t("reportingUnavailable") : storageReady === null ? t("checkingNetwork") : t("reportingActive")}</span><span className="signal-meta">{issues.length} {t("liveReports")}</span></div>
@@ -437,7 +443,10 @@ export function RoadLensApp() {
 
       {syncMessage && <button className="sync-banner" onClick={() => setSyncMessage(null)}><Check /> {syncMessage}<X /></button>}
 
+      {/* FRONTEND EDIT: Main desktop layout. The sidebar and map are sibling elements.
+          Swap their order here to put the map first; change .workspace columns in globals.css. */}
       <section className="workspace">
+        {/* FRONTEND EDIT: Left operations sidebar: heading, KPI cards, severity bars, and queue. */}
         <aside className="control-panel">
           <div className="eyebrow"><Crosshair /> {t("overview")}</div>
           <h1>{t("roadOperations")}</h1>
@@ -462,13 +471,14 @@ export function RoadLensApp() {
           </div>
         </aside>
 
+        {/* FRONTEND EDIT: Map workspace: toolbar, map overlays, selected-report details, and route button. */}
         <section className="map-panel" aria-label="Dushanbe road issue map">
           <div className="map-toolbar"><div className="map-tabs"><button className={mapMode === "live" ? "active" : ""} onClick={() => commandMap("city")}><Map /> {t("liveMap")}</button><button className={mapMode === "heatmap" ? "active" : ""} disabled={!mapIssues.length} onClick={() => commandMap("heatmap")}><BarChart3 /> {t("hotspots")}</button><button className={mapMode === "route" ? "active" : ""} disabled={!routeIssues.length} onClick={() => commandMap("route")}><Route /> {t("inspectionRoute")}</button></div><button className="map-action" disabled={!priorityIssue} onClick={() => commandMap("priority")}><LocateFixed /> {t("focusPriority")}</button></div>
           <div className="map-canvas">
-            <DushanbeMap issues={mapMode === "route" ? routeIssues : mapIssues} selectedId={selectedId} mode={mapMode} viewCommand={mapCommand} onSelect={setSelectedId} />
+            <DushanbeMap issues={mapMode === "route" ? activeRouteIssues : mapIssues} selectedId={selectedId} mode={mapMode} viewCommand={mapCommand} onSelect={setSelectedId} />
             <div className="map-mode-notice" role="status">{mapMode === "route" ? <Route /> : <Map />} {mapNotice}</div>
             {issues.length > mapIssues.length && <div className="map-location-note"><LocateFixed /> {issues.length - mapIssues.length} {issues.length - mapIssues.length === 1 ? "report needs" : "reports need"} location verification</div>}
-            {mapMode === "route" && routeIssues.length > 0 && <div className="route-summary"><Navigation /><span><strong>Inspection route active</strong><small>{routeIssues.length} priority {routeIssues.length === 1 ? "stop" : "stops"} · ordered by severity</small></span></div>}
+            {mapMode === "route" && activeRouteIssues.length > 0 && <div className="route-summary"><Navigation /><span><strong>Inspection route active</strong><small>{activeRouteIssues.length}{routeIssues.length > activeRouteIssues.length ? ` of ${routeIssues.length}` : ""} priority {activeRouteIssues.length === 1 ? "stop" : "stops"} · ordered by severity</small></span></div>}
             <div className="map-legend"><span><i className="legend-dot critical" /> Critical</span><span><i className="legend-dot high" /> High</span><span><i className="legend-dot medium" /> Medium</span></div>
           </div>
           {selected ? <article className="issue-detail">
@@ -480,6 +490,7 @@ export function RoadLensApp() {
         </section>
       </section>
 
+      {/* FRONTEND EDIT: Complete photo-report dialog. Preserve refs and click handlers when rearranging controls. */}
       {scanOpen && <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && closeScan()}>
         <section className="scan-modal" role="dialog" aria-modal="true" aria-labelledby="scan-title">
           <div className="scan-head"><div><span className="eyebrow"><Sparkles /> {t("newObservation")}</span><h2 id="scan-title">{t("scanDamage")}</h2></div><button className="icon-button" onClick={closeScan} aria-label="Close"><X /></button></div>

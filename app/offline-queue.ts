@@ -28,10 +28,23 @@ async function transaction<T>(mode: IDBTransactionMode, run: (store: IDBObjectSt
   return new Promise<T>((resolve, reject) => {
     const tx = db.transaction(STORE, mode);
     const request = run(tx.objectStore(STORE));
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
-    tx.oncomplete = () => db.close();
-    tx.onerror = () => { db.close(); reject(tx.error); };
+    let result: T;
+    let settled = false;
+    request.onsuccess = () => { result = request.result; };
+    const fail = () => {
+      if (settled) return;
+      settled = true;
+      db.close();
+      reject(tx.error || request.error || new Error("Offline storage transaction failed"));
+    };
+    tx.oncomplete = () => {
+      if (settled) return;
+      settled = true;
+      db.close();
+      resolve(result);
+    };
+    tx.onerror = fail;
+    tx.onabort = fail;
   });
 }
 
@@ -63,7 +76,9 @@ export async function flushQueuedReports() {
     const form = new FormData();
     Object.entries(report.fields).forEach(([key, value]) => form.set(key, value));
     form.set("image", new File([report.image], report.imageName, { type: report.imageType }));
-    const response = await fetch("/api/reports", { method: "POST", body: form });
+    let response: Response;
+    try { response = await fetch("/api/reports", { method: "POST", body: form }); }
+    catch { break; }
     if (!response.ok) {
       if (response.status >= 400 && response.status < 500 && response.status !== 429) await transaction("readwrite", (store) => store.delete(report.id));
       break;
@@ -73,4 +88,3 @@ export async function flushQueuedReports() {
   }
   return { sent, remaining: await queuedReportCount() };
 }
-

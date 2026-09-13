@@ -1,5 +1,6 @@
 import { env } from "cloudflare:workers";
 import { getRawDb } from "@/db";
+import { isWithinDushanbe } from "@/lib/dushanbe";
 
 export const runtime = "edge";
 
@@ -64,7 +65,6 @@ export async function GET() {
               CASE WHEN r.location_source = 'approximate' AND r.street NOT LIKE '%needs verification%' AND r.detail NOT LIKE '%approximate location%' THEN 'gps' ELSE r.location_source END AS locationSource,
               r.defect_type AS defectType,
               r.ai_explanation AS aiExplanation, r.status,
-              r.reviewer_note AS reviewerNote, r.reviewed_at AS reviewedAt,
               COALESCE(r.updated_at, r.created_at) AS updatedAt, r.created_at AS createdAt,
               (SELECT COUNT(*) FROM road_reports d WHERE d.duplicate_of = r.id AND d.status != 'rejected') AS duplicateCount,
               CASE WHEN r.image_key IS NULL THEN 0 ELSE 1 END AS hasImage
@@ -99,6 +99,7 @@ export async function POST(request: Request) {
   const confidence = confidenceValue === null || confidenceValue === "" ? null : Number(confidenceValue);
   const image = form.get("image");
   if (!Number.isFinite(latitude) || !Number.isFinite(longitude) || latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180) return Response.json({ error: "A valid location is required." }, { status: 422 });
+  if (!isWithinDushanbe(latitude, longitude)) return Response.json({ error: "RoadLens currently accepts reports within Dushanbe only." }, { status: 422 });
   if (locationAccuracy !== null && (!Number.isFinite(locationAccuracy) || locationAccuracy < 0 || locationAccuracy > 50_000)) return Response.json({ error: "Location accuracy is invalid." }, { status: 422 });
   if (confidence !== null && (!Number.isFinite(confidence) || confidence < 0 || confidence > 100)) return Response.json({ error: "Confidence must be between 0 and 100." }, { status: 422 });
   if (!(image instanceof File) || !supportedImageTypes.has(image.type.toLowerCase()) || image.size === 0 || image.size > 8_000_000) return Response.json({ error: "Attach a JPEG, PNG, WebP, HEIC, or HEIF road image smaller than 8 MB." }, { status: 422 });

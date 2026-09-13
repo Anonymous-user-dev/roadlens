@@ -1,5 +1,7 @@
 # RoadLens
 
+For quick layout, text, color, and component changes during judging, see [FRONTEND_GUIDE.md](FRONTEND_GUIDE.md).
+
 RoadLens turns phone-captured road observations into a shared, prioritized repair map. The prototype is designed for Dushanbe and includes an installable iPhone-friendly PWA, GPS capture, durable report storage, image evidence, a repair-route view, and a real ONNX pothole detector.
 
 ## Architecture
@@ -27,6 +29,7 @@ The migration command initializes the local report database on a fresh checkout;
 Before a release, run:
 
 ```powershell
+npm test
 npm run lint
 npm run build
 ```

@@ -4,6 +4,9 @@ import { createContext, useContext, useState } from "react";
 import { Languages } from "lucide-react";
 
 type Locale = "en" | "tg" | "ru";
+// BEGINNER SYNTAX: Text uses quotes, items use commas, and [square brackets] hold a list.
+// FRONTEND EDIT: Each entry is [English, Tajik, Russian]. Add or change translated text here.
+// English-only operational messages remain beside their JSX in roadlens-app.tsx and review/page.tsx.
 const copy = {
   reportingActive: ["Road reporting active", "Гузоришдиҳии роҳ фаъол аст", "Приём дорожных отчётов активен"],
   reportingUnavailable: ["Reporting temporarily unavailable", "Гузориш муваққатан дастнорас аст", "Приём отчётов временно недоступен"],

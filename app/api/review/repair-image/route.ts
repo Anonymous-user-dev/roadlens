@@ -15,6 +15,8 @@ export async function GET(request: Request) {
   const id = new URL(request.url).searchParams.get("id");
   if (!validId(id)) return Response.json({ error: "A valid report is required." }, { status: 422 });
   try {
+    const report = await getRawDb().prepare("SELECT status FROM road_reports WHERE id = ? AND status != 'rejected' LIMIT 1").bind(id).first<{ status: string }>();
+    if (!report) return Response.json({ error: "Report not found." }, { status: 404 });
     if (env.BUCKET) {
       const object = await env.BUCKET.get(key(id));
       if (!object) return Response.json({ error: "No completion image is available." }, { status: 404 });
@@ -41,8 +43,10 @@ export async function POST(request: Request) {
     if (env.BUCKET) await env.BUCKET.put(key(id), image.stream(), { httpMetadata: { contentType: image.type } });
     else if (env.PHOTOS) await env.PHOTOS.put(key(id), await image.arrayBuffer(), { metadata: { contentType: image.type } });
     else return Response.json({ error: "Evidence storage is unavailable." }, { status: 503 });
-    const now = new Date().toISOString();
-    await getRawDb().prepare("INSERT INTO review_audit_events (id, report_id, action, from_status, to_status, reviewer, details, created_at) VALUES (?, ?, 'completion_evidence', ?, ?, ?, 'Completion photo uploaded', ?)").bind(crypto.randomUUID(), id, report.status, report.status, reviewer, now).run();
-    return Response.json({ uploaded: true });
   } catch { return Response.json({ error: "Completion evidence could not be saved." }, { status: 503 }); }
+  const now = new Date().toISOString();
+  try {
+    await getRawDb().prepare("INSERT INTO review_audit_events (id, report_id, action, from_status, to_status, reviewer, details, created_at) VALUES (?, ?, 'completion_evidence', ?, ?, ?, 'Completion photo uploaded', ?)").bind(crypto.randomUUID(), id, report.status, report.status, reviewer, now).run();
+  } catch (error) { console.error("Completion evidence saved without an audit event", error); }
+  return Response.json({ uploaded: true });
 }

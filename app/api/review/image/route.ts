@@ -9,7 +9,7 @@ export async function GET(request: Request) {
   const id = new URL(request.url).searchParams.get("id");
   if (!id || !/^RL-[A-F0-9]{8}$/.test(id)) return Response.json({ error: "A valid report is required." }, { status: 422 });
   try {
-    const row = await getRawDb().prepare("SELECT image_key FROM road_reports WHERE id = ? LIMIT 1").bind(id).first<{ image_key: string | null }>();
+    const row = await getRawDb().prepare("SELECT image_key FROM road_reports WHERE id = ? AND status != 'rejected' LIMIT 1").bind(id).first<{ image_key: string | null }>();
     if (!row?.image_key) return Response.json({ error: "No review image is available." }, { status: 404 });
     if (env.BUCKET) {
       const object = await env.BUCKET.get(row.image_key);

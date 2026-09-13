@@ -1,4 +1,4 @@
-const CACHE = "roadlens-shell-v4";
+const CACHE = "roadlens-shell-v5";
 const SHELL = ["/", "/manifest.webmanifest", "/favicon.svg"];
 
 self.addEventListener("install", (event) => {
@@ -24,6 +24,11 @@ self.addEventListener("fetch", (event) => {
         }
         return response;
       })
-      .catch(() => caches.match(event.request).then((cached) => cached || caches.match("/"))),
+      .catch(async () => {
+        const cached = await caches.match(event.request);
+        if (cached) return cached;
+        if (event.request.mode === "navigate") return (await caches.match("/")) || new Response("RoadLens is offline.", { status: 503, headers: { "Content-Type": "text/plain; charset=utf-8" } });
+        return new Response("Offline resource unavailable.", { status: 503, headers: { "Content-Type": "text/plain; charset=utf-8" } });
+      }),
   );
 });

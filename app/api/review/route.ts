@@ -1,9 +1,10 @@
 import { env } from "cloudflare:workers";
 import { getRawDb } from "@/db";
+import { isWithinDushanbe } from "@/lib/dushanbe";
+import { isReviewedStatus, nextReviewedStatus } from "@/lib/review-workflow";
 
 export const runtime = "edge";
 
-const allowedStatuses = new Set(["verified", "scheduled", "repairing", "repaired"]);
 const allowedSeverities = new Set(["Critical", "High", "Medium"]);
 
 function isAuthorized(request: Request) {
@@ -47,12 +48,13 @@ export async function PATCH(request: Request) {
   const id = typeof body.id === "string" && /^RL-[A-F0-9]{8}$/.test(body.id) ? body.id : null;
   if (!id) return Response.json({ error: "A valid report is required." }, { status: 422 });
   const decision = body.decision === "verify" || body.decision === "reject" ? body.decision : null;
-  const requestedStatus = typeof body.status === "string" && allowedStatuses.has(body.status) ? body.status : null;
+  const requestedStatus = isReviewedStatus(body.status) ? body.status : null;
   if (!decision && !requestedStatus) return Response.json({ error: "A valid review decision or workflow status is required." }, { status: 422 });
 
   const latitude = typeof body.latitude === "number" && Number.isFinite(body.latitude) && body.latitude >= -90 && body.latitude <= 90 ? body.latitude : null;
   const longitude = typeof body.longitude === "number" && Number.isFinite(body.longitude) && body.longitude >= -180 && body.longitude <= 180 ? body.longitude : null;
   if ((body.latitude !== undefined || body.longitude !== undefined) && (latitude === null || longitude === null)) return Response.json({ error: "Both corrected coordinates are required." }, { status: 422 });
+  if (latitude !== null && !isWithinDushanbe(latitude, longitude)) return Response.json({ error: "Corrected coordinates must be within Dushanbe." }, { status: 422 });
   const severity = typeof body.severity === "string" && allowedSeverities.has(body.severity) ? body.severity : null;
   const defectType = text(body.defectType, 60);
   const street = text(body.street, 120);
@@ -66,15 +68,14 @@ export async function PATCH(request: Request) {
     if (decision === "verify" && current.status !== "pending_review") return Response.json({ error: "Only pending reports can be verified." }, { status: 409 });
     if (decision === "reject" && current.status !== "pending_review") return Response.json({ error: "Only pending reports can be rejected." }, { status: 409 });
     const nextStatus = decision === "verify" ? "verified" : decision === "reject" ? "rejected" : requestedStatus!;
-    const transitions: Record<string, string> = { verified: "scheduled", scheduled: "repairing", repairing: "repaired" };
-    if (!decision && transitions[current.status] !== nextStatus) return Response.json({ error: "This workflow step is out of order. Refresh the workspace and try again." }, { status: 409 });
+    if (!decision && nextReviewedStatus(current.status) !== nextStatus) return Response.json({ error: "This workflow step is out of order. Refresh the workspace and try again." }, { status: 409 });
     if (nextStatus === "repaired") {
       const repairKey = `repairs/${id}`;
       const evidence = env.BUCKET ? await env.BUCKET.head(repairKey) : env.PHOTOS ? await env.PHOTOS.get(repairKey) : null;
       if (!evidence) return Response.json({ error: "Upload a completion photo before marking this repair complete." }, { status: 409 });
     }
 
-    const statements = [getRawDb().prepare(
+    const updateResult = await getRawDb().prepare(
       `UPDATE road_reports SET
          status = ?,
          street = CASE WHEN ? = '' THEN street ELSE ? END,
@@ -83,24 +84,29 @@ export async function PATCH(request: Request) {
          reviewer_note = CASE WHEN ? = '' THEN reviewer_note ELSE ? END,
          latitude = COALESCE(?, latitude), longitude = COALESCE(?, longitude),
          location_source = CASE WHEN ? IS NULL THEN location_source ELSE 'reviewer' END,
-         location_accuracy = CASE WHEN ? IS NULL THEN location_accuracy ELSE 0 END,
+         location_accuracy = CASE WHEN ? IS NULL THEN location_accuracy ELSE NULL END,
          confirmations = confirmations + CASE WHEN ? = 'verified' AND status = 'pending_review' THEN 1 ELSE 0 END,
          reviewed_at = CASE WHEN ? IN ('verified','rejected') THEN ? ELSE reviewed_at END,
          updated_at = ?
-       WHERE id = ?`,
-    ).bind(nextStatus, street, street, severity, defectType, defectType, reviewerNote, reviewerNote, latitude, longitude, latitude, latitude, nextStatus, nextStatus, now, now, id),
-    getRawDb().prepare("INSERT INTO review_audit_events (id, report_id, action, from_status, to_status, reviewer, details, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").bind(crypto.randomUUID(), id, decision || "status_change", current.status, nextStatus, reviewer, reviewerNote || null, now)];
+       WHERE id = ? AND status = ?`,
+    ).bind(nextStatus, street, street, severity, defectType, defectType, reviewerNote, reviewerNote, latitude, longitude, latitude, latitude, nextStatus, nextStatus, now, now, id, current.status).run();
+    if ((updateResult.meta.changes ?? 0) === 0) return Response.json({ error: "This report changed in another session. Refresh the workspace and try again." }, { status: 409 });
+
+    try {
+      await getRawDb().prepare("INSERT INTO review_audit_events (id, report_id, action, from_status, to_status, reviewer, details, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").bind(crypto.randomUUID(), id, decision || "status_change", current.status, nextStatus, reviewer, reviewerNote || null, now).run();
+    } catch (error) { console.error("Review update saved without an audit event", error); }
     if (nextStatus === "verified" && current.duplicateOf && current.status === "pending_review") {
-      statements.push(getRawDb().prepare("UPDATE road_reports SET confirmations = confirmations + 1, updated_at = ? WHERE id = ?").bind(now, current.duplicateOf));
+      try { await getRawDb().prepare("UPDATE road_reports SET confirmations = confirmations + 1, updated_at = ? WHERE id = ?").bind(now, current.duplicateOf).run(); }
+      catch (error) { console.error("Unable to update duplicate confirmation count", error); }
     }
-    await getRawDb().batch(statements);
 
     if (decision === "reject" && current.imageKey) {
+      let removed = false;
       try {
-        if (env.BUCKET) await env.BUCKET.delete(current.imageKey);
-        else if (env.PHOTOS) await env.PHOTOS.delete(current.imageKey);
+        if (env.BUCKET) { await env.BUCKET.delete(current.imageKey); removed = true; }
+        else if (env.PHOTOS) { await env.PHOTOS.delete(current.imageKey); removed = true; }
       } catch (error) { console.error("Unable to remove rejected review image", error); }
-      await getRawDb().prepare("UPDATE road_reports SET image_key = NULL WHERE id = ?").bind(id).run();
+      if (removed) await getRawDb().prepare("UPDATE road_reports SET image_key = NULL WHERE id = ?").bind(id).run().catch((error) => console.error("Unable to clear rejected image reference", error));
     }
     return Response.json({ report: { id, status: nextStatus } });
   } catch (error) {
