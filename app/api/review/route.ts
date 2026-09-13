@@ -32,7 +32,7 @@ export async function GET(request: Request) {
        ORDER BY CASE status WHEN 'pending_review' THEN 0 WHEN 'verified' THEN 1 WHEN 'scheduled' THEN 2 WHEN 'repairing' THEN 3 ELSE 4 END,
                 created_at ASC LIMIT 250`,
     ).all();
-    return Response.json({ reports: rows.results });
+    return Response.json({ reports: rows.results }, { headers: { "Cache-Control": "private, no-store" } });
   } catch (error) {
     console.error("Unable to load review queue", error);
     return Response.json({ error: "The review queue is temporarily unavailable." }, { status: 503 });
