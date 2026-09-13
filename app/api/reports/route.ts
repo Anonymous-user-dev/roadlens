@@ -40,18 +40,21 @@ export async function POST(request: Request) {
   const id = `RL-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
   const imageKey = `reports/${id}/${crypto.randomUUID()}`;
   const createdAt = new Date().toISOString();
+  let storedImageKey: string | null = null;
   try {
-    if (!env.BUCKET) throw new Error("Road image storage is unavailable.");
-    await env.BUCKET.put(imageKey, image.stream(), { httpMetadata: { contentType: image.type } });
+    if (env.BUCKET) {
+      await env.BUCKET.put(imageKey, image.stream(), { httpMetadata: { contentType: image.type } });
+      storedImageKey = imageKey;
+    }
     await getRawDb().prepare(
       `INSERT INTO road_reports
        (id, street, detail, severity, confidence, confirmations, latitude, longitude, image_key, status, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).bind(id, street, detail, severity, confidence, 1, latitude, longitude, imageKey, confidence === null ? "pending_review" : "model_screened", createdAt).run();
+    ).bind(id, street, detail, severity, confidence, 1, latitude, longitude, storedImageKey, confidence === null ? "pending_review" : "model_screened", createdAt).run();
     return Response.json({ report: { id, street, detail, severity, confidence, confirmations: 1, latitude, longitude, status: confidence === null ? "pending_review" : "model_screened", createdAt } }, { status: 201 });
   } catch (error) {
     console.error("Unable to save road report", error);
-    if (env.BUCKET) await env.BUCKET.delete(imageKey).catch(() => undefined);
+    if (storedImageKey && env.BUCKET) await env.BUCKET.delete(storedImageKey).catch(() => undefined);
     return Response.json({ error: "The report could not be saved. Keep this screen open and try again." }, { status: 503 });
   }
 }
