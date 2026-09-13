@@ -34,6 +34,16 @@ warnings.simplefilter("error", Image.DecompressionBombWarning)
 register_heif_opener()
 
 
+@app.get("/")
+def root() -> dict:
+    return {
+        "name": "RoadLens detector",
+        "status": "ok",
+        "health": "/health",
+        "docs": "/docs",
+    }
+
+
 def model_checksum(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as model_file:
