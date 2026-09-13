@@ -30,3 +30,17 @@ export const submissionRateLimits = sqliteTable("submission_rate_limits", {
   requestCount: integer("request_count").notNull().default(1),
   expiresAt: text("expires_at").notNull(),
 }, (table) => [index("idx_submission_rate_limits_expires").on(table.expiresAt)]);
+
+export const reviewAuditEvents = sqliteTable("review_audit_events", {
+  id: text("id").primaryKey(),
+  reportId: text("report_id").notNull(),
+  action: text("action").notNull(),
+  fromStatus: text("from_status"),
+  toStatus: text("to_status"),
+  reviewer: text("reviewer").notNull(),
+  details: text("details"),
+  createdAt: text("created_at").notNull(),
+}, (table) => [
+  index("idx_review_audit_report_created").on(table.reportId, table.createdAt),
+  index("idx_review_audit_created").on(table.createdAt),
+]);

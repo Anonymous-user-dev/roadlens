@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import "leaflet/dist/leaflet.css";
+import { LanguageProvider } from "@/app/language";
 
 export const metadata: Metadata = {
   title: "RoadLens · Dushanbe road health",
@@ -21,7 +22,7 @@ export default function RootLayout({
   return (
     <html lang="en" className="dark">
       <head><meta name="theme-color" content="#07100d" /></head>
-      <body className="antialiased">{children}</body>
+      <body className="antialiased"><LanguageProvider>{children}</LanguageProvider></body>
     </html>
   );
 }

@@ -32,7 +32,8 @@ export async function GET(request: Request) {
        ORDER BY CASE status WHEN 'pending_review' THEN 0 WHEN 'verified' THEN 1 WHEN 'scheduled' THEN 2 WHEN 'repairing' THEN 3 ELSE 4 END,
                 created_at ASC LIMIT 250`,
     ).all();
-    return Response.json({ reports: rows.results }, { headers: { "Cache-Control": "private, no-store" } });
+    const events = await getRawDb().prepare("SELECT id, report_id AS reportId, action, from_status AS fromStatus, to_status AS toStatus, reviewer, details, created_at AS createdAt FROM review_audit_events ORDER BY created_at DESC LIMIT 100").all();
+    return Response.json({ reports: rows.results, events: events.results }, { headers: { "Cache-Control": "private, no-store", "X-Frame-Options": "DENY", "Referrer-Policy": "no-referrer" } });
   } catch (error) {
     console.error("Unable to load review queue", error);
     return Response.json({ error: "The review queue is temporarily unavailable." }, { status: 503 });
@@ -56,6 +57,7 @@ export async function PATCH(request: Request) {
   const defectType = text(body.defectType, 60);
   const street = text(body.street, 120);
   const reviewerNote = text(body.reviewerNote, 240);
+  const reviewer = text(body.reviewer, 120) || "admin";
   const now = new Date().toISOString();
 
   try {
@@ -66,6 +68,11 @@ export async function PATCH(request: Request) {
     const nextStatus = decision === "verify" ? "verified" : decision === "reject" ? "rejected" : requestedStatus!;
     const transitions: Record<string, string> = { verified: "scheduled", scheduled: "repairing", repairing: "repaired" };
     if (!decision && transitions[current.status] !== nextStatus) return Response.json({ error: "This workflow step is out of order. Refresh the workspace and try again." }, { status: 409 });
+    if (nextStatus === "repaired") {
+      const repairKey = `repairs/${id}`;
+      const evidence = env.BUCKET ? await env.BUCKET.head(repairKey) : env.PHOTOS ? await env.PHOTOS.get(repairKey) : null;
+      if (!evidence) return Response.json({ error: "Upload a completion photo before marking this repair complete." }, { status: 409 });
+    }
 
     const statements = [getRawDb().prepare(
       `UPDATE road_reports SET
@@ -81,7 +88,8 @@ export async function PATCH(request: Request) {
          reviewed_at = CASE WHEN ? IN ('verified','rejected') THEN ? ELSE reviewed_at END,
          updated_at = ?
        WHERE id = ?`,
-    ).bind(nextStatus, street, street, severity, defectType, defectType, reviewerNote, reviewerNote, latitude, longitude, latitude, latitude, nextStatus, nextStatus, now, now, id)];
+    ).bind(nextStatus, street, street, severity, defectType, defectType, reviewerNote, reviewerNote, latitude, longitude, latitude, latitude, nextStatus, nextStatus, now, now, id),
+    getRawDb().prepare("INSERT INTO review_audit_events (id, report_id, action, from_status, to_status, reviewer, details, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").bind(crypto.randomUUID(), id, decision || "status_change", current.status, nextStatus, reviewer, reviewerNote || null, now)];
     if (nextStatus === "verified" && current.duplicateOf && current.status === "pending_review") {
       statements.push(getRawDb().prepare("UPDATE road_reports SET confirmations = confirmations + 1, updated_at = ? WHERE id = ?").bind(now, current.duplicateOf));
     }

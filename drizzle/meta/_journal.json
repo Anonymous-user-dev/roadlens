@@ -22,6 +22,13 @@
       "when": 1789298773747,
       "tag": "0002_aspiring_sunfire",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1789306577443,
+      "tag": "0003_pink_daimon_hellstrom",
+      "breakpoints": true
     }
   ]
 }

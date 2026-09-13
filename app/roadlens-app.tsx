@@ -8,6 +8,7 @@ import { BarChart3, Camera, Check, ChevronRight, CircleAlert, Crosshair, LocateF
 import { Button } from "@/components/ui/button";
 import { flushQueuedReports, queueReport, queuedReportCount } from "@/app/offline-queue";
 import { preparePrivateImage } from "@/app/image-privacy";
+import { LanguageControl, useLanguage } from "@/app/language";
 
 const DushanbeMap = dynamic(() => import("@/app/dushanbe-map").then((module) => module.DushanbeMap), {
   ssr: false,
@@ -61,6 +62,7 @@ const severityStyle = { Critical: "critical", High: "high", Medium: "medium" };
 const statusLabel: Record<Issue["status"], string> = { pending_review: "Needs review", verified: "Confirmed", scheduled: "Scheduled", repairing: "Repairing", repaired: "Repaired" };
 
 export function RoadLensApp() {
+  const { t } = useLanguage();
   const [issues, setIssues] = useState<Issue[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [scanOpen, setScanOpen] = useState(false);
@@ -81,8 +83,8 @@ export function RoadLensApp() {
   const [queuedCount, setQueuedCount] = useState(0);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const [metadataRemoved, setMetadataRemoved] = useState(false);
-  const [mapMode, setMapMode] = useState<"live" | "route">("live");
-  const [mapCommand, setMapCommand] = useState<{ kind: "city" | "priority" | "route"; sequence: number }>({ kind: "city", sequence: 0 });
+  const [mapMode, setMapMode] = useState<"live" | "route" | "heatmap">("live");
+  const [mapCommand, setMapCommand] = useState<{ kind: "city" | "priority" | "route" | "heatmap"; sequence: number }>({ kind: "city", sequence: 0 });
   const [mapNotice, setMapNotice] = useState("Showing the full Dushanbe road network");
   const cameraRef = useRef<HTMLInputElement>(null);
   const uploadRef = useRef<HTMLInputElement>(null);
@@ -110,13 +112,14 @@ export function RoadLensApp() {
   }), [mapIssues]);
   const priorityIssue = routeIssues[0] ?? mapIssues[0] ?? null;
 
-  function commandMap(kind: "city" | "priority" | "route") {
+  function commandMap(kind: "city" | "priority" | "route" | "heatmap") {
     if (kind === "city") { setMapMode("live"); setMapNotice("Showing the full Dushanbe road network"); }
     if (kind === "priority") {
       if (priorityIssue) setSelectedId(priorityIssue.id);
       setMapNotice(priorityIssue ? `Focused on ${priorityIssue.severity.toLowerCase()} priority ${priorityIssue.id}` : "No mapped reports to focus on");
     }
     if (kind === "route") { setMapMode("route"); setMapNotice(routeIssues.length ? `Inspection route ready · ${routeIssues.length} ${routeIssues.length === 1 ? "stop" : "stops"}` : "No verified locations available for routing"); }
+    if (kind === "heatmap") { setMapMode("heatmap"); setMapNotice("Showing damage concentration across Dushanbe"); }
     setMapCommand((current) => ({ kind, sequence: current.sequence + 1 }));
   }
 
@@ -428,25 +431,25 @@ export function RoadLensApp() {
     <main className="app-shell">
       <header className="topbar">
         <div className="brand" aria-label="RoadLens home"><span className="brand-mark"><Route aria-hidden="true" /></span><span>RoadLens</span><span className="city-label">DUSHANBE</span></div>
-        <div className="topbar-center"><span className={`live-dot ${storageReady === false ? "warning" : ""}`} /><span>{storageReady === false ? "Reporting temporarily unavailable" : storageReady === null ? "Checking report network…" : "Road reporting active"}</span><span className="signal-meta">{issues.length} live reports</span></div>
-        <div className="topbar-actions">{(offline || queuedCount > 0) && <span className="offline-pill"><WifiOff /> {offline ? "Offline" : "Syncing"} · {queuedCount} queued</span>}<Link className="review-link" href="/review">Operations</Link><Button className="scan-button" onClick={openScan}><Camera /> Start road scan</Button></div>
+        <div className="topbar-center"><span className={`live-dot ${storageReady === false ? "warning" : ""}`} /><span>{storageReady === false ? t("reportingUnavailable") : storageReady === null ? t("checkingNetwork") : t("reportingActive")}</span><span className="signal-meta">{issues.length} {t("liveReports")}</span></div>
+        <div className="topbar-actions">{(offline || queuedCount > 0) && <span className="offline-pill"><WifiOff /> {offline ? "Offline" : "Syncing"} · {queuedCount} queued</span>}<LanguageControl /><Link className="review-link" href="/review">{t("operations")}</Link><Button className="scan-button" onClick={openScan}><Camera /> {t("startScan")}</Button></div>
       </header>
 
       {syncMessage && <button className="sync-banner" onClick={() => setSyncMessage(null)}><Check /> {syncMessage}<X /></button>}
 
       <section className="workspace">
         <aside className="control-panel">
-          <div className="eyebrow"><Crosshair /> Operations overview</div>
-          <h1>Dushanbe road<br />operations</h1>
-          <p className="intro">From phone evidence to a verified repair queue.</p>
+          <div className="eyebrow"><Crosshair /> {t("overview")}</div>
+          <h1>{t("roadOperations")}</h1>
+          <p className="intro">{t("intro")}</p>
           <div className="metrics-grid">
-            <article><strong>{metrics.open}</strong><span>Open reports</span><em>{metrics.today} today</em></article>
-            <article><strong>{metrics.pending}</strong><span>Awaiting review</span><em>Human queue</em></article>
-            <article><strong>{metrics.repairing}</strong><span>In repair flow</span><em>Scheduled or active</em></article>
-            <article><strong>{metrics.repaired}</strong><span>Repaired</span><em className="good">Completed work</em></article>
+            <article><strong>{metrics.open}</strong><span>{t("openReports")}</span><em>{metrics.today} today</em></article>
+            <article><strong>{metrics.pending}</strong><span>{t("awaitingReview")}</span><em>Human queue</em></article>
+            <article><strong>{metrics.repairing}</strong><span>{t("repairFlow")}</span><em>Scheduled or active</em></article>
+            <article><strong>{metrics.repaired}</strong><span>{t("repaired")}</span><em className="good">Completed work</em></article>
           </div>
           <div className="network-pulse"><div className="section-heading"><span><BarChart3 /> Active severity</span><small>{metrics.open} unresolved</small></div>{(["Critical", "High", "Medium"] as const).map((severity) => <div className="severity-bar" key={severity}><span>{severity}</span><i><b className={severity.toLowerCase()} style={{ width: `${severityCounts[severity] / severityTotal * 100}%` }} /></i><strong>{severityCounts[severity]}</strong></div>)}</div>
-          <div className="section-heading"><span>Priority queue</span><small>{Math.min(issues.length, 4)} shown</small></div>
+          <div className="section-heading"><span>{t("priorityQueue")}</span><small>{Math.min(issues.length, 4)} shown</small></div>
           <div className="issue-list">
             {!issues.length && <div className="issue-empty"><Map /><strong>No reports yet</strong><small>Upload the first road observation to begin.</small></div>}
             {issues.slice(0, 4).map((issue) => (
@@ -460,7 +463,7 @@ export function RoadLensApp() {
         </aside>
 
         <section className="map-panel" aria-label="Dushanbe road issue map">
-          <div className="map-toolbar"><div className="map-tabs"><button className={mapMode === "live" ? "active" : ""} onClick={() => commandMap("city")}><Map /> Live map</button><button className={mapMode === "route" ? "active" : ""} disabled={!routeIssues.length} onClick={() => commandMap("route")}><Route /> Inspection route</button></div><button className="map-action" disabled={!priorityIssue} onClick={() => commandMap("priority")}><LocateFixed /> Focus priority</button></div>
+          <div className="map-toolbar"><div className="map-tabs"><button className={mapMode === "live" ? "active" : ""} onClick={() => commandMap("city")}><Map /> {t("liveMap")}</button><button className={mapMode === "heatmap" ? "active" : ""} disabled={!mapIssues.length} onClick={() => commandMap("heatmap")}><BarChart3 /> {t("hotspots")}</button><button className={mapMode === "route" ? "active" : ""} disabled={!routeIssues.length} onClick={() => commandMap("route")}><Route /> {t("inspectionRoute")}</button></div><button className="map-action" disabled={!priorityIssue} onClick={() => commandMap("priority")}><LocateFixed /> {t("focusPriority")}</button></div>
           <div className="map-canvas">
             <DushanbeMap issues={mapMode === "route" ? routeIssues : mapIssues} selectedId={selectedId} mode={mapMode} viewCommand={mapCommand} onSelect={setSelectedId} />
             <div className="map-mode-notice" role="status">{mapMode === "route" ? <Route /> : <Map />} {mapNotice}</div>
@@ -479,19 +482,19 @@ export function RoadLensApp() {
 
       {scanOpen && <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && closeScan()}>
         <section className="scan-modal" role="dialog" aria-modal="true" aria-labelledby="scan-title">
-          <div className="scan-head"><div><span className="eyebrow"><Sparkles /> New observation</span><h2 id="scan-title">Scan road damage</h2></div><button className="icon-button" onClick={closeScan} aria-label="Close"><X /></button></div>
-          {!preview ? <div className="capture-zone"><span className="capture-icon"><Camera /></span><strong>Add a clear road photo</strong><small>Keep the damaged area centered and avoid people or license plates.</small><div className="capture-actions"><Button onClick={() => cameraRef.current?.click()}><Camera /> Take photo</Button><Button variant="outline" onClick={() => uploadRef.current?.click()}><Upload /> Upload photo</Button></div></div> : <div className="photo-preview"><Image src={preview} alt="Road damage awaiting analysis" fill unoptimized /><div className="photo-actions"><button onClick={() => cameraRef.current?.click()}><Camera /> Retake</button><button onClick={() => uploadRef.current?.click()}><Upload /> Replace</button></div></div>}
+          <div className="scan-head"><div><span className="eyebrow"><Sparkles /> {t("newObservation")}</span><h2 id="scan-title">{t("scanDamage")}</h2></div><button className="icon-button" onClick={closeScan} aria-label="Close"><X /></button></div>
+          {!preview ? <div className="capture-zone"><span className="capture-icon"><Camera /></span><strong>{t("addPhoto")}</strong><small>Keep the damaged area centered and avoid people or license plates.</small><div className="capture-actions"><Button onClick={() => cameraRef.current?.click()}><Camera /> {t("takePhoto")}</Button><Button variant="outline" onClick={() => uploadRef.current?.click()}><Upload /> {t("uploadPhoto")}</Button></div></div> : <div className="photo-preview"><Image src={preview} alt="Road damage awaiting analysis" fill unoptimized /><div className="photo-actions"><button onClick={() => cameraRef.current?.click()}><Camera /> Retake</button><button onClick={() => uploadRef.current?.click()}><Upload /> Replace</button></div></div>}
           <input ref={cameraRef} hidden type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" capture="environment" onChange={(event) => { const file = event.currentTarget.files?.[0]; event.currentTarget.value = ""; void selectPhoto(file); }} />
           <input ref={uploadRef} hidden type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" onChange={(event) => { const file = event.currentTarget.files?.[0]; event.currentTarget.value = ""; void selectPhoto(file); }} />
           {fileError && <div className="result-card warning"><span><CircleAlert /></span><div><strong>Photo cannot be used</strong><small>{fileError}</small></div></div>}
-          <div className={`location-row ${locationSource === "approximate" || (locationAccuracy !== null && locationAccuracy > 100) ? "approximate" : ""}`}><LocateFixed /><div><strong>{scanStep === "locating" ? "Finding your precise location…" : location}</strong><small>{locationHint}</small>{locationAccuracy !== null && <span className="accuracy-meter"><i style={{ width: `${Math.max(8, Math.min(100, 100 - locationAccuracy / 2))}%` }} /> GPS precision</span>}</div><button onClick={locate}>Refresh</button></div>
+          <div className={`location-row ${locationSource === "approximate" || (locationAccuracy !== null && locationAccuracy > 100) ? "approximate" : ""}`}><LocateFixed /><div><strong>{scanStep === "locating" ? "Finding your precise location…" : location}</strong><small>{locationHint}</small>{locationAccuracy !== null && <span className="accuracy-meter"><i style={{ width: `${Math.max(8, Math.min(100, 100 - locationAccuracy / 2))}%` }} /> GPS precision</span>}</div><button onClick={locate}>{t("refresh")}</button></div>
           {scanStep === "analyzing" && <div className="analysis-state"><span className="scanner" /><div><strong>Inspecting road surface</strong><small>Checking for supported pothole and crack patterns…</small></div></div>}
           {scanStep === "found" && detection && <div className="result-card"><span><Check /></span><div><strong>Probable {detection.label} detected</strong><small>{detection.severity} priority · {detection.confidence}% model confidence</small><p>{detection.explanation}</p></div></div>}
           {scanStep === "possible" && detection && <div className="result-card warning"><span><CircleAlert /></span><div><strong>Possible {detection.label}</strong><small>Low-confidence match ({detection.confidence}%)</small><p>{detection.explanation}</p></div></div>}
           {scanStep === "noissue" && <div className="result-card neutral"><span><Check /></span><div><strong>No road defect passed the quality threshold</strong><small>The model may miss thin cracks, dark scenes, rain, or distant damage. You can still submit for human review.</small></div></div>}
           {scanStep === "unavailable" && <div className="result-card warning actionable"><span><CircleAlert /></span><div><strong>Automatic detection is unavailable</strong><small>{analysisError || "Your photo is still here and can be reviewed by a person."}</small><button type="button" onClick={analyze}>Try automatic analysis again</button></div></div>}
           {scanStep === "submiterror" && <div className="result-card error"><span><CircleAlert /></span><div><strong>Report not submitted</strong><small>{submitError}</small></div></div>}
-          <div className="scan-footer"><span className="privacy-note"><ShieldCheck /> {metadataRemoved ? "Photo metadata removed · reviewers only" : "Evidence is available only to authorized reviewers"}</span>{["found", "possible", "noissue", "unavailable", "saving", "submiterror"].includes(scanStep) ? <Button disabled={!coordinates || scanStep === "saving"} onClick={saveDetection}>{scanStep === "saving" ? (offline ? "Saving offline…" : "Submitting…") : scanStep === "submiterror" ? "Try submission again" : "Submit for human review"} <ChevronRight /></Button> : <Button disabled={!preview || scanStep === "analyzing" || scanStep === "locating"} onClick={analyze}>{scanStep === "analyzing" ? "Analyzing…" : "Analyze photo"}</Button>}</div>
+          <div className="scan-footer"><span className="privacy-note"><ShieldCheck /> {metadataRemoved ? "Photo metadata removed · reviewers only" : "Evidence is available only to authorized reviewers"}</span>{["found", "possible", "noissue", "unavailable", "saving", "submiterror"].includes(scanStep) ? <Button disabled={!coordinates || scanStep === "saving"} onClick={saveDetection}>{scanStep === "saving" ? (offline ? "Saving offline…" : "Submitting…") : scanStep === "submiterror" ? "Try submission again" : t("submitReview")} <ChevronRight /></Button> : <Button disabled={!preview || scanStep === "analyzing" || scanStep === "locating"} onClick={analyze}>{scanStep === "analyzing" ? "Analyzing…" : t("analyze")}</Button>}</div>
         </section>
       </div>}
     </main>
