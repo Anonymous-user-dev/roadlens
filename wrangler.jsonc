@@ -19,7 +19,8 @@
     {
       "binding": "DB",
       "database_name": "roadlens-db",
-      "database_id": "23b61d03-3893-4280-b3b7-0c6adc2d7902"
+      "database_id": "23b61d03-3893-4280-b3b7-0c6adc2d7902",
+      "migrations_dir": "drizzle"
     }
   ],
   "kv_namespaces": [

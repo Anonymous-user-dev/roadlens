@@ -1,4 +1,4 @@
-const CACHE = "roadlens-shell-v2";
+const CACHE = "roadlens-shell-v3";
 const SHELL = ["/", "/manifest.webmanifest", "/favicon.svg"];
 
 self.addEventListener("install", (event) => {

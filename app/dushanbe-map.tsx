@@ -7,6 +7,7 @@ type MapIssue = {
   id: string;
   street: string;
   severity: "Critical" | "High" | "Medium";
+  status: "pending_review" | "verified" | "scheduled" | "repairing" | "repaired";
   coordinates: { latitude: number; longitude: number };
 };
 
@@ -82,11 +83,11 @@ export function DushanbeMap({ issues, selectedId, mode, onSelect }: DushanbeMapP
     reportLayersRef.current = issues.map((issue, index) => {
       const markerIcon = L.divIcon({
         className: "report-marker-shell",
-        html: `<span class="real-map-marker ${issue.severity.toLowerCase()} ${selectedId === issue.id ? "selected" : ""}"><b>${index + 1}</b></span>`,
+        html: `<span class="real-map-marker ${issue.severity.toLowerCase()} status-${issue.status} ${selectedId === issue.id ? "selected" : ""}"><b>${index + 1}</b></span>`,
         iconSize: [42, 42],
         iconAnchor: [21, 42],
       });
-      return L.marker([issue.coordinates.latitude, issue.coordinates.longitude], { icon: markerIcon, keyboard: true, title: `${issue.severity} report on ${issue.street}` })
+      return L.marker([issue.coordinates.latitude, issue.coordinates.longitude], { icon: markerIcon, keyboard: true, title: `${issue.severity} ${issue.status.replace("_", " ")} report on ${issue.street}` })
         .on("click", () => onSelect(issue.id))
         .addTo(map);
     });
