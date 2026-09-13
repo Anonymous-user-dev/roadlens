@@ -16,6 +16,13 @@ type Issue = {
   fresh?: boolean;
 };
 
+type Detection = {
+  confidence: number;
+  severity: Issue["severity"];
+  label: string;
+  certainty: "probable" | "possible";
+};
+
 const initialIssues: Issue[] = [
   { id: "RL-1042", street: "Rudaki Avenue", detail: "Deep pothole · northbound", severity: "Critical", confidence: 97, confirmations: 6, position: { x: 63, y: 34 } },
   { id: "RL-1038", street: "Ismoili Somoni Avenue", detail: "Broken asphalt · right lane", severity: "High", confidence: 93, confirmations: 4, position: { x: 39, y: 58 } },
@@ -28,12 +35,12 @@ export function RoadLensApp() {
   const [issues, setIssues] = useState(initialIssues);
   const [selectedId, setSelectedId] = useState(initialIssues[0].id);
   const [scanOpen, setScanOpen] = useState(false);
-  const [scanStep, setScanStep] = useState<"ready" | "locating" | "analyzing" | "found" | "noissue" | "unavailable" | "saving">("ready");
+  const [scanStep, setScanStep] = useState<"ready" | "locating" | "analyzing" | "found" | "possible" | "noissue" | "unavailable" | "saving">("ready");
   const [preview, setPreview] = useState<string | null>(null);
   const [photo, setPhoto] = useState<File | null>(null);
   const [location, setLocation] = useState("Location not captured");
   const [coordinates, setCoordinates] = useState<{ latitude: number; longitude: number } | null>(null);
-  const [detection, setDetection] = useState<{ confidence: number; severity: Issue["severity"] } | null>(null);
+  const [detection, setDetection] = useState<Detection | null>(null);
   const [fileError, setFileError] = useState<string | null>(null);
   const [storageReady, setStorageReady] = useState<boolean | null>(null);
   const [offline, setOffline] = useState(false);
@@ -186,13 +193,15 @@ export function RoadLensApp() {
       const response = await fetch("/api/analyze", { method: "POST", body: form });
       if (run !== analysisRun.current) return;
       if (!response.ok) { setScanStep("unavailable"); return; }
-      const result = await response.json() as { detections?: Array<{ confidence?: number }> };
+      const result = await response.json() as { detections?: Array<{ confidence?: number; label?: string }> };
       const best = [...(result.detections ?? [])].sort((a, b) => (b.confidence ?? 0) - (a.confidence ?? 0))[0];
       if (!best || typeof best.confidence !== "number") { setDetection(null); setScanStep("noissue"); return; }
       const confidence = Math.max(0, Math.min(100, Math.round(best.confidence <= 1 ? best.confidence * 100 : best.confidence)));
       const severity: Issue["severity"] = confidence >= 90 ? "Critical" : confidence >= 72 ? "High" : "Medium";
-      setDetection({ confidence, severity });
-      setScanStep("found");
+      const label = best.label?.trim() || "road damage";
+      const certainty: Detection["certainty"] = confidence >= 40 ? "probable" : "possible";
+      setDetection({ confidence, severity, label, certainty });
+      setScanStep(certainty === "probable" ? "found" : "possible");
     } catch { if (run === analysisRun.current) setScanStep("unavailable"); }
   }
 
@@ -204,13 +213,14 @@ export function RoadLensApp() {
     form.set("latitude", String(coordinates.latitude));
     form.set("longitude", String(coordinates.longitude));
     form.set("severity", detection?.severity ?? "Medium");
-    form.set("detail", detection ? "Probable pothole · model screened" : "Road damage · awaiting review");
+    const detectionDetail = detection ? `${detection.certainty === "probable" ? "Probable" : "Possible"} ${detection.label} · model screened` : "Road damage · awaiting review";
+    form.set("detail", detectionDetail);
     if (detection) form.set("confidence", String(detection.confidence));
     try {
       const response = await fetch("/api/reports", { method: "POST", body: form });
       const result = await response.json() as { report?: { id: string } };
       if (!response.ok || !result.report) { if (response.status >= 500) setStorageReady(false); setScanStep("unavailable"); return; }
-      const issue: Issue = { id: result.report.id, street: "Current road segment", detail: detection ? "Probable pothole · model screened" : "Road damage · awaiting review", severity: detection?.severity ?? "Medium", confidence: detection?.confidence ?? null, confirmations: 1, position: { x: Math.max(4, Math.min(96, ((coordinates.longitude - 68.73) / 0.14) * 100)), y: Math.max(4, Math.min(96, 100 - ((coordinates.latitude - 38.52) / 0.11) * 100)) }, fresh: true };
+      const issue: Issue = { id: result.report.id, street: "Current road segment", detail: detectionDetail, severity: detection?.severity ?? "Medium", confidence: detection?.confidence ?? null, confirmations: 1, position: { x: Math.max(4, Math.min(96, ((coordinates.longitude - 68.73) / 0.14) * 100)), y: Math.max(4, Math.min(96, 100 - ((coordinates.latitude - 38.52) / 0.11) * 100)) }, fresh: true };
       setStorageReady(true); setIssues((current) => [issue, ...current]); setSelectedId(issue.id); closeScan();
     } catch { setStorageReady(false); setScanStep("unavailable"); }
   }
@@ -276,10 +286,11 @@ export function RoadLensApp() {
           {fileError && <div className="result-card warning"><span><CircleAlert /></span><div><strong>Photo cannot be used</strong><small>{fileError}</small></div></div>}
           <div className="location-row"><LocateFixed /><div><strong>{scanStep === "locating" ? "Finding your location…" : location}</strong><small>Coordinates are attached only to this road report.</small></div><button onClick={locate}>Refresh</button></div>
           {scanStep === "analyzing" && <div className="analysis-state"><span className="scanner" /><div><strong>Inspecting road surface</strong><small>Checking shape, depth cues, and pavement boundaries…</small></div></div>}
-          {scanStep === "found" && detection && <div className="result-card"><span><Check /></span><div><strong>Probable pothole detected</strong><small>{detection.severity} priority · {detection.confidence}% model confidence · review recommended</small></div></div>}
-          {scanStep === "noissue" && <div className="result-card neutral"><span><Check /></span><div><strong>No pothole detected</strong><small>You can still submit the observation for human review.</small></div></div>}
+          {scanStep === "found" && detection && <div className="result-card"><span><Check /></span><div><strong>Probable {detection.label} detected</strong><small>{detection.severity} priority · {detection.confidence}% model confidence · review recommended</small></div></div>}
+          {scanStep === "possible" && detection && <div className="result-card warning"><span><CircleAlert /></span><div><strong>Possible {detection.label}</strong><small>Low-confidence match ({detection.confidence}%) · submit for human review.</small></div></div>}
+          {scanStep === "noissue" && <div className="result-card neutral"><span><Check /></span><div><strong>No confident road damage found</strong><small>This is not a guarantee. You can still submit the observation for human review.</small></div></div>}
           {scanStep === "unavailable" && <div className="result-card warning"><span><CircleAlert /></span><div><strong>Automatic detection is unavailable</strong><small>Your photo is still here. Submit it for human review or try analysis again.</small></div></div>}
-          <div className="scan-footer"><span className="privacy-note"><ShieldCheck /> Faces and plates should be removed before long-term retention</span>{["found", "noissue", "unavailable", "saving"].includes(scanStep) ? <Button disabled={!coordinates || scanStep === "saving"} onClick={saveDetection}>{scanStep === "saving" ? "Saving…" : "Submit observation"} <ChevronRight /></Button> : <Button disabled={!preview || scanStep === "analyzing" || scanStep === "locating"} onClick={analyze}>{scanStep === "analyzing" ? "Analyzing…" : "Analyze photo"}</Button>}</div>
+          <div className="scan-footer"><span className="privacy-note"><ShieldCheck /> Faces and plates should be removed before long-term retention</span>{["found", "possible", "noissue", "unavailable", "saving"].includes(scanStep) ? <Button disabled={!coordinates || scanStep === "saving"} onClick={saveDetection}>{scanStep === "saving" ? "Saving…" : "Submit observation"} <ChevronRight /></Button> : <Button disabled={!preview || scanStep === "analyzing" || scanStep === "locating"} onClick={analyze}>{scanStep === "analyzing" ? "Analyzing…" : "Analyze photo"}</Button>}</div>
         </section>
       </div>}
     </main>

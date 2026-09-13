@@ -15,16 +15,23 @@ from fastapi import FastAPI, File, Header, HTTPException, UploadFile
 from PIL import Image, ImageOps, UnidentifiedImageError
 from pillow_heif import register_heif_opener
 
-DEFAULT_MODEL_URL = "https://huggingface.co/peterhdd/pothole-detection-yolov8/resolve/main/best.onnx"
-DEFAULT_MODEL_SHA256 = "91dd7de7a110c61314ea19a958fcc85c7b3461cc6d60d87fefc08b41ac6e32c5"
+DEFAULT_MODEL_URL = "https://huggingface.co/vinothvikas1987/pothole-detection-yolov8/resolve/main/best.onnx"
+DEFAULT_MODEL_SHA256 = "590a20e8c4a7bcbdb32e8a3b7b3a3c1d57d1fa8a7dde5c83fcec8928a4aa753f"
 MODEL_URL = os.getenv("MODEL_URL", DEFAULT_MODEL_URL)
 MODEL_PATH = Path(os.getenv("MODEL_PATH", Path(__file__).with_name("best.onnx")))
 MODEL_SHA256 = os.getenv("MODEL_SHA256", DEFAULT_MODEL_SHA256 if MODEL_URL == DEFAULT_MODEL_URL else "").lower()
 API_KEY = os.getenv("INFERENCE_API_KEY", "")
-CONFIDENCE_THRESHOLD = float(os.getenv("CONFIDENCE_THRESHOLD", "0.35"))
+CONFIDENCE_THRESHOLD = float(os.getenv("CONFIDENCE_THRESHOLD", "0.15"))
 IOU_THRESHOLD = float(os.getenv("IOU_THRESHOLD", "0.55"))
 MAX_UPLOAD_BYTES = 8_000_000
 INPUT_SIZE = 640
+CLASS_NAMES = (
+    "longitudinal crack",
+    "transverse crack",
+    "alligator crack",
+    "pothole",
+    "other road damage",
+)
 
 app = FastAPI(title="RoadLens detector", version="0.1.0")
 session: ort.InferenceSession | None = None
@@ -55,8 +62,9 @@ def model_checksum(path: Path) -> str:
 def ensure_model() -> Path:
     if MODEL_PATH.exists() and MODEL_PATH.stat().st_size > 1_000_000:
         if MODEL_SHA256 and model_checksum(MODEL_PATH) != MODEL_SHA256:
-            raise RuntimeError("Model checksum mismatch")
-        return MODEL_PATH
+            MODEL_PATH.unlink()
+        else:
+            return MODEL_PATH
     MODEL_PATH.parent.mkdir(parents=True, exist_ok=True)
     temporary = MODEL_PATH.with_suffix(".download")
     try:
@@ -112,9 +120,14 @@ def decode(output: np.ndarray, original: tuple[int, int], transform: tuple[float
         raise RuntimeError(f"Model output has too few columns: {predictions.shape}")
 
     class_scores = predictions[:, 4:]
+    if class_scores.shape[1] != len(CLASS_NAMES):
+        raise RuntimeError(f"Expected {len(CLASS_NAMES)} model classes, got {class_scores.shape[1]}")
+    class_ids = class_scores.argmax(axis=1)
     scores = class_scores.max(axis=1)
-    rows = predictions[scores >= CONFIDENCE_THRESHOLD]
-    scores = scores[scores >= CONFIDENCE_THRESHOLD]
+    accepted = scores >= CONFIDENCE_THRESHOLD
+    rows = predictions[accepted]
+    scores = scores[accepted]
+    class_ids = class_ids[accepted]
     if not len(rows):
         return []
 
@@ -132,8 +145,10 @@ def decode(output: np.ndarray, original: tuple[int, int], transform: tuple[float
         keep.append(current)
         if len(order) == 1:
             break
-        overlaps = intersection_over_union(boxes[current], boxes[order[1:]])
-        order = order[1:][overlaps < IOU_THRESHOLD]
+        remaining = order[1:]
+        overlaps = intersection_over_union(boxes[current], boxes[remaining])
+        different_class = class_ids[remaining] != class_ids[current]
+        order = remaining[(overlaps < IOU_THRESHOLD) | different_class]
 
     scale, offset_x, offset_y = transform
     width, height = original
@@ -146,7 +161,7 @@ def decode(output: np.ndarray, original: tuple[int, int], transform: tuple[float
             max(0.0, min(width, (float(x2) - offset_x) / scale)),
             max(0.0, min(height, (float(y2) - offset_y) / scale)),
         ]
-        detections.append({"label": "pothole", "confidence": round(float(scores[index]), 4), "box": [round(value, 1) for value in converted]})
+        detections.append({"label": CLASS_NAMES[int(class_ids[index])], "confidence": round(float(scores[index]), 4), "box": [round(value, 1) for value in converted]})
     return detections
 
 
