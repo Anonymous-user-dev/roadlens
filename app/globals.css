@@ -158,7 +158,10 @@ button { font: inherit; }
 .map-tabs button.active { color: #e8f0eb; }
 .map-tabs button.active:after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 2px; background: #b7f451; }
 .map-tabs svg,.map-action svg { width: 15px; }
-.map-canvas { position: relative; overflow: hidden; background: radial-gradient(circle at 55% 45%,rgba(65,103,79,.18),transparent 40%),#0d1a15; }
+.map-canvas { position: relative; overflow: hidden; background: #0d1a15; }
+.real-map { position: absolute; inset: 0; }.real-map .maplibregl-canvas { outline: none; }.real-map .maplibregl-ctrl-group { overflow: hidden; border: 1px solid #3b5146; border-radius: 9px; background: #0b1712; box-shadow: 0 4px 18px rgba(0,0,0,.3); }.real-map .maplibregl-ctrl-group button { filter: invert(1); opacity: .78; }.real-map .maplibregl-ctrl-attrib { color: #34483d; background: rgba(7,16,13,.76); }.real-map .maplibregl-ctrl-attrib a { color: #62776c; }.map-load-error { position: absolute; z-index: 4; left: 50%; top: 50%; translate: -50% -50%; width: min(360px,calc(100% - 32px)); padding: 14px; border: 1px solid #743b3b; border-radius: 10px; background: #281414; color: #ffd1d1; text-align: center; font-size: 13px; }
+.map-loading { position: absolute; inset: 0; display: grid; place-items: center; color: #8fa499; background: #0d1a15; font-size: 13px; }
+.real-map-marker { width: 34px; height: 34px; display: grid; place-items: center; border: 3px solid #0d1a15; border-radius: 50% 50% 50% 8px; rotate: -45deg; color: #07100d; font: 850 11px/1 system-ui,sans-serif; cursor: pointer; box-shadow: 0 5px 16px rgba(0,0,0,.5); }.real-map-marker span { rotate: 45deg; }.real-map-marker.critical { background: #ff765f; }.real-map-marker.high { background: #ffb95f; }.real-map-marker.medium { background: #ead965; }.real-map-marker.selected { width: 40px; height: 40px; outline: 5px solid rgba(183,244,81,.28); z-index: 3; }
 .map-grid { position: absolute; inset: 0; opacity: .26; background-image: linear-gradient(#23362d 1px,transparent 1px),linear-gradient(90deg,#23362d 1px,transparent 1px); background-size: 42px 42px; transform: rotate(-7deg) scale(1.2); }
 .road-network { position: absolute; inset: 0; width: 100%; height: 100%; filter: drop-shadow(0 0 8px rgba(0,0,0,.2)); }
 .road { fill: none; stroke: #34483d; stroke-width: 8; stroke-linecap: round; }

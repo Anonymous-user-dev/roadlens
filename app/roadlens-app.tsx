@@ -3,8 +3,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { Camera, Check, ChevronRight, CircleAlert, Crosshair, LocateFixed, Map, Navigation, OctagonAlert, Route, ShieldCheck, Sparkles, Upload, WifiOff, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+
+const DushanbeMap = dynamic(() => import("@/app/dushanbe-map").then((module) => module.DushanbeMap), {
+  ssr: false,
+  loading: () => <div className="map-loading">Loading Dushanbe street map…</div>,
+});
 
 type Issue = {
   id: string;
@@ -13,7 +19,7 @@ type Issue = {
   severity: "Critical" | "High" | "Medium";
   confidence: number | null;
   confirmations: number;
-  position: { x: number; y: number };
+  coordinates: { latitude: number; longitude: number };
   status: "pending_review" | "model_screened" | "verified";
   createdAt: string;
   fresh?: boolean;
@@ -135,10 +141,7 @@ export function RoadLensApp() {
             confirmations: report.confirmations,
             status: report.status === "verified" || report.status === "model_screened" ? report.status : "pending_review",
             createdAt: report.createdAt,
-            position: {
-              x: Math.max(4, Math.min(96, ((report.longitude - 68.73) / 0.14) * 100)),
-              y: Math.max(4, Math.min(96, 100 - ((report.latitude - 38.52) / 0.11) * 100)),
-            },
+            coordinates: { latitude: report.latitude, longitude: report.longitude },
           }));
           setIssues(saved);
           setSelectedId((current) => current && saved.some((report) => report.id === current) ? current : saved[0]?.id ?? null);
@@ -302,7 +305,7 @@ export function RoadLensApp() {
         setScanStep("submiterror");
         return;
       }
-      const issue: Issue = { id: result.report.id, street: locationSource === "gps" ? "Current road segment" : "Dushanbe · location needs verification", detail: detectionDetail, severity: detection?.severity ?? "Medium", confidence: detection?.confidence ?? null, confirmations: 0, status: result.report.status, createdAt: result.report.createdAt, position: { x: Math.max(4, Math.min(96, ((coordinates.longitude - 68.73) / 0.14) * 100)), y: Math.max(4, Math.min(96, 100 - ((coordinates.latitude - 38.52) / 0.11) * 100)) }, fresh: true };
+      const issue: Issue = { id: result.report.id, street: locationSource === "gps" ? "Current road segment" : "Dushanbe · location needs verification", detail: detectionDetail, severity: detection?.severity ?? "Medium", confidence: detection?.confidence ?? null, confirmations: 0, status: result.report.status, createdAt: result.report.createdAt, coordinates, fresh: true };
       setStorageReady(true); setIssues((current) => [issue, ...current]); setSelectedId(issue.id); closeScan();
     } catch {
       setStorageReady(false);
@@ -346,13 +349,7 @@ export function RoadLensApp() {
         <section className="map-panel" aria-label="Dushanbe road issue map">
           <div className="map-toolbar"><div className="map-tabs"><button className={mapMode === "live" ? "active" : ""} onClick={() => setMapMode("live")}><Map /> Live map</button><button className={mapMode === "route" ? "active" : ""} onClick={() => setMapMode("route")}><Route /> Inspection route</button></div><button className="map-action" disabled={!issues.length} onClick={() => setSelectedId(issues[0]?.id ?? null)}><LocateFixed /> Focus priority</button></div>
           <div className="map-canvas">
-            <div className="map-grid" />
-            <svg className="road-network" viewBox="0 0 1000 700" preserveAspectRatio="none" aria-hidden="true">
-              <path className="road major" d="M-40 590 C180 480 260 410 430 280 S760 80 1040 120" /><path className="road major" d="M490 -40 C500 170 540 260 590 370 S670 590 720 760" /><path className="road" d="M30 220 C240 250 330 330 480 390 S790 500 1030 440" /><path className="road" d="M150 -20 C190 180 260 280 350 390 S490 620 500 750" /><path className="road" d="M760 -20 C730 160 700 270 650 360 S570 570 600 740" /><path className="river" d="M-30 110 C250 160 270 70 520 150 S830 260 1030 190" />
-              {mapMode === "route" && <path className="inspection-route" d="M390 406 C460 350 545 330 630 238 S685 380 720 483" />}
-            </svg>
-            <div className="district-label label-1">SINO</div><div className="district-label label-2">ISMOILI SOMONI</div><div className="district-label label-3">SHOHMANSUR</div><div className="street-label street-1">Rudaki Avenue</div><div className="street-label street-2">Ismoili Somoni Ave</div>
-            {issues.map((issue, index) => <button key={issue.id} className={`map-marker ${severityStyle[issue.severity]} ${selectedId === issue.id ? "selected" : ""} ${issue.fresh ? "fresh" : ""}`} style={{ left: `${issue.position.x}%`, top: `${issue.position.y}%` }} onClick={() => setSelectedId(issue.id)} aria-label={`${issue.severity} issue on ${issue.street}`}><span>{index + 1}</span></button>)}
+            <DushanbeMap issues={issues} selectedId={selectedId} mode={mapMode} onSelect={setSelectedId} />
             {mapMode === "route" && issues.length > 0 && <div className="route-summary"><Navigation /><span><strong>Inspection route</strong><small>{Math.min(3, issues.length)} priority {issues.length === 1 ? "stop" : "stops"}</small></span></div>}
             <div className="map-legend"><span><i className="legend-dot critical" /> Critical</span><span><i className="legend-dot high" /> High</span><span><i className="legend-dot medium" /> Medium</span></div>
           </div>
