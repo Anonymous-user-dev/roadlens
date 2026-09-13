@@ -22,6 +22,12 @@
       "database_id": "23b61d03-3893-4280-b3b7-0c6adc2d7902"
     }
   ],
+  "kv_namespaces": [
+    {
+      "binding": "PHOTOS",
+      "id": "4cad2419e73e4302adeeb7bbf50feb74"
+    }
+  ],
   "vars": {
     "INFERENCE_API_URL": "https://roadlens-yipd.onrender.com"
   },

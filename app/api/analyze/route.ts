@@ -12,7 +12,7 @@ function normalizeDetectorResponse(value: unknown): DetectorResponse | null {
     if (!candidate || typeof candidate !== "object" || !("confidence" in candidate) || typeof candidate.confidence !== "number" || !Number.isFinite(candidate.confidence)) return [];
     const confidence = Math.max(0, Math.min(1, candidate.confidence > 1 ? candidate.confidence / 100 : candidate.confidence));
     const label = "label" in candidate && typeof candidate.label === "string" ? candidate.label.slice(0, 40) : undefined;
-    const box = "box" in candidate && Array.isArray(candidate.box) && candidate.box.length === 4 && candidate.box.every((coordinate) => typeof coordinate === "number" && Number.isFinite(coordinate)) ? candidate.box : undefined;
+    const box = "box" in candidate && Array.isArray(candidate.box) && candidate.box.length === 4 && candidate.box.every((coordinate: unknown) => typeof coordinate === "number" && Number.isFinite(coordinate)) ? candidate.box : undefined;
     return [{ confidence, label, box }];
   });
   return { detections };
