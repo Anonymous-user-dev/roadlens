@@ -53,6 +53,7 @@ export function RoadLensApp() {
   const [location, setLocation] = useState("Location not captured");
   const [coordinates, setCoordinates] = useState<{ latitude: number; longitude: number } | null>(null);
   const [locationSource, setLocationSource] = useState<LocationSource | null>(null);
+  const [locationHint, setLocationHint] = useState("Coordinates are attached only to this road report.");
   const [detection, setDetection] = useState<Detection | null>(null);
   const [fileError, setFileError] = useState<string | null>(null);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
@@ -81,6 +82,7 @@ export function RoadLensApp() {
     setLocation("Location not captured");
     setCoordinates(null);
     setLocationSource(null);
+    setLocationHint("Coordinates are attached only to this road report.");
     setDetection(null);
     setFileError(null);
     setAnalysisError(null);
@@ -183,18 +185,33 @@ export function RoadLensApp() {
   function locate() {
     const run = ++locationRun.current;
     setScanStep("locating");
-    const setApproximateLocation = () => {
+    setLocationHint("Requesting location from your phone…");
+    const setApproximateLocation = (error?: GeolocationPositionError) => {
       if (run !== locationRun.current) return;
       setCoordinates(DUSHANBE_FALLBACK);
       setLocationSource("approximate");
       setLocation("Dushanbe center · approximate");
+      setLocationHint(error?.code === 1
+        ? "Location is blocked for this website. Allow it in your browser settings, then tap Refresh."
+        : error?.code === 2
+          ? "Your phone could not get a location fix. Move near a window and tap Refresh."
+          : error?.code === 3
+            ? "Location took too long. Tap Refresh to try again."
+            : "This browser did not provide GPS. A reviewer must confirm the road location.");
       setScanStep("ready");
     };
     if (!navigator.geolocation) { setApproximateLocation(); return; }
     navigator.geolocation.getCurrentPosition(
-      ({ coords }) => { if (run !== locationRun.current) return; setCoordinates({ latitude: coords.latitude, longitude: coords.longitude }); setLocationSource("gps"); setLocation(`${coords.latitude.toFixed(5)}, ${coords.longitude.toFixed(5)}`); setScanStep("ready"); },
+      ({ coords }) => {
+        if (run !== locationRun.current) return;
+        setCoordinates({ latitude: coords.latitude, longitude: coords.longitude });
+        setLocationSource("gps");
+        setLocation(`${coords.latitude.toFixed(5)}, ${coords.longitude.toFixed(5)} · ±${Math.max(1, Math.round(coords.accuracy))} m`);
+        setLocationHint("Location received from your phone. Tap Refresh if you have moved.");
+        setScanStep("ready");
+      },
       setApproximateLocation,
-      { enableHighAccuracy: true, timeout: 8000 },
+      { enableHighAccuracy: false, timeout: 20_000, maximumAge: 300_000 },
     );
   }
 
@@ -208,6 +225,7 @@ export function RoadLensApp() {
     setPreview(null);
     setCoordinates(null);
     setLocationSource(null);
+    setLocationHint("Requesting location from your phone…");
     setLocation("Location not captured");
     setDetection(null);
     setAnalysisError(null);
@@ -354,7 +372,7 @@ export function RoadLensApp() {
           <input ref={cameraRef} hidden type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" capture="environment" onChange={(event) => { const file = event.currentTarget.files?.[0]; event.currentTarget.value = ""; selectPhoto(file); }} />
           <input ref={uploadRef} hidden type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" onChange={(event) => { const file = event.currentTarget.files?.[0]; event.currentTarget.value = ""; selectPhoto(file); }} />
           {fileError && <div className="result-card warning"><span><CircleAlert /></span><div><strong>Photo cannot be used</strong><small>{fileError}</small></div></div>}
-          <div className={`location-row ${locationSource === "approximate" ? "approximate" : ""}`}><LocateFixed /><div><strong>{scanStep === "locating" ? "Finding your location…" : location}</strong><small>{locationSource === "approximate" ? "GPS was unavailable. A reviewer must confirm the road location." : "Coordinates are attached only to this road report."}</small></div><button onClick={locate}>Refresh</button></div>
+          <div className={`location-row ${locationSource === "approximate" ? "approximate" : ""}`}><LocateFixed /><div><strong>{scanStep === "locating" ? "Finding your location…" : location}</strong><small>{locationHint}</small></div><button onClick={locate}>Refresh</button></div>
           {scanStep === "analyzing" && <div className="analysis-state"><span className="scanner" /><div><strong>Inspecting road surface</strong><small>Checking shape, depth cues, and pavement boundaries…</small></div></div>}
           {scanStep === "found" && detection && <div className="result-card"><span><Check /></span><div><strong>Probable {detection.label} detected</strong><small>{detection.severity} priority · {detection.confidence}% model confidence · review recommended</small></div></div>}
           {scanStep === "possible" && detection && <div className="result-card warning"><span><CircleAlert /></span><div><strong>Possible {detection.label}</strong><small>Low-confidence match ({detection.confidence}%) · submit for human review.</small></div></div>}
