@@ -72,6 +72,7 @@ export function RoadLensApp() {
   const analysisRun = useRef(0);
   const locationRun = useRef(0);
   const selected = useMemo(() => issues.find((issue) => issue.id === selectedId) ?? issues[0] ?? null, [issues, selectedId]);
+  const mapIssues = useMemo(() => issues.filter((issue) => !issue.detail.includes("approximate location")), [issues]);
   const metrics = useMemo(() => ({
     open: issues.filter((issue) => issue.status !== "verified").length,
     pending: issues.filter((issue) => issue.status === "pending_review").length,
@@ -347,10 +348,11 @@ export function RoadLensApp() {
         </aside>
 
         <section className="map-panel" aria-label="Dushanbe road issue map">
-          <div className="map-toolbar"><div className="map-tabs"><button className={mapMode === "live" ? "active" : ""} onClick={() => setMapMode("live")}><Map /> Live map</button><button className={mapMode === "route" ? "active" : ""} onClick={() => setMapMode("route")}><Route /> Inspection route</button></div><button className="map-action" disabled={!issues.length} onClick={() => setSelectedId(issues[0]?.id ?? null)}><LocateFixed /> Focus priority</button></div>
+          <div className="map-toolbar"><div className="map-tabs"><button className={mapMode === "live" ? "active" : ""} onClick={() => setMapMode("live")}><Map /> Live map</button><button className={mapMode === "route" ? "active" : ""} onClick={() => setMapMode("route")}><Route /> Inspection route</button></div><button className="map-action" disabled={!mapIssues.length} onClick={() => setSelectedId(mapIssues[0]?.id ?? null)}><LocateFixed /> Focus priority</button></div>
           <div className="map-canvas">
-            <DushanbeMap issues={issues} selectedId={selectedId} mode={mapMode} onSelect={setSelectedId} />
-            {mapMode === "route" && issues.length > 0 && <div className="route-summary"><Navigation /><span><strong>Inspection route</strong><small>{Math.min(3, issues.length)} priority {issues.length === 1 ? "stop" : "stops"}</small></span></div>}
+            <DushanbeMap issues={mapIssues} selectedId={selectedId} mode={mapMode} onSelect={setSelectedId} />
+            {issues.length > mapIssues.length && <div className="map-location-note"><LocateFixed /> {issues.length - mapIssues.length} {issues.length - mapIssues.length === 1 ? "report needs" : "reports need"} location verification</div>}
+            {mapMode === "route" && mapIssues.length > 0 && <div className="route-summary"><Navigation /><span><strong>Inspection route</strong><small>{Math.min(3, mapIssues.length)} priority {mapIssues.length === 1 ? "stop" : "stops"}</small></span></div>}
             <div className="map-legend"><span><i className="legend-dot critical" /> Critical</span><span><i className="legend-dot high" /> High</span><span><i className="legend-dot medium" /> Medium</span></div>
           </div>
           {selected ? <article className="issue-detail">
