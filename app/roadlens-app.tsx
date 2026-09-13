@@ -26,19 +26,37 @@ type Detection = {
   certainty: "probable" | "possible";
 };
 
+type LocationSource = "gps" | "approximate";
+
+const DUSHANBE_FALLBACK = { latitude: 38.5737, longitude: 68.7738 };
+const supportedImageTypes = new Set(["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"]);
+const imageTypesByExtension: Record<string, string> = {
+  jpeg: "image/jpeg", jpg: "image/jpeg", png: "image/png", webp: "image/webp", heic: "image/heic", heif: "image/heif",
+};
+
+function normalizeImageFile(file: File) {
+  if (supportedImageTypes.has(file.type.toLowerCase())) return file;
+  const extension = file.name.split(".").pop()?.toLowerCase() ?? "";
+  const inferredType = imageTypesByExtension[extension];
+  return inferredType ? new File([file], file.name, { type: inferredType, lastModified: file.lastModified }) : null;
+}
+
 const severityStyle = { Critical: "critical", High: "high", Medium: "medium" };
 
 export function RoadLensApp() {
   const [issues, setIssues] = useState<Issue[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [scanOpen, setScanOpen] = useState(false);
-  const [scanStep, setScanStep] = useState<"ready" | "locating" | "analyzing" | "found" | "possible" | "noissue" | "unavailable" | "saving">("ready");
+  const [scanStep, setScanStep] = useState<"ready" | "locating" | "analyzing" | "found" | "possible" | "noissue" | "unavailable" | "saving" | "submiterror">("ready");
   const [preview, setPreview] = useState<string | null>(null);
   const [photo, setPhoto] = useState<File | null>(null);
   const [location, setLocation] = useState("Location not captured");
   const [coordinates, setCoordinates] = useState<{ latitude: number; longitude: number } | null>(null);
+  const [locationSource, setLocationSource] = useState<LocationSource | null>(null);
   const [detection, setDetection] = useState<Detection | null>(null);
   const [fileError, setFileError] = useState<string | null>(null);
+  const [analysisError, setAnalysisError] = useState<string | null>(null);
+  const [submitError, setSubmitError] = useState<string | null>(null);
   const [storageReady, setStorageReady] = useState<boolean | null>(null);
   const [offline, setOffline] = useState(false);
   const [mapMode, setMapMode] = useState<"live" | "route">("live");
@@ -62,8 +80,11 @@ export function RoadLensApp() {
     setPhoto(null);
     setLocation("Location not captured");
     setCoordinates(null);
+    setLocationSource(null);
     setDetection(null);
     setFileError(null);
+    setAnalysisError(null);
+    setSubmitError(null);
     if (cameraRef.current) cameraRef.current.value = "";
     if (uploadRef.current) uploadRef.current.value = "";
   }, []);
@@ -162,36 +183,46 @@ export function RoadLensApp() {
   function locate() {
     const run = ++locationRun.current;
     setScanStep("locating");
-    if (!navigator.geolocation) { setLocation("Dushanbe · approximate location"); setScanStep("ready"); return; }
+    const setApproximateLocation = () => {
+      if (run !== locationRun.current) return;
+      setCoordinates(DUSHANBE_FALLBACK);
+      setLocationSource("approximate");
+      setLocation("Dushanbe center · approximate");
+      setScanStep("ready");
+    };
+    if (!navigator.geolocation) { setApproximateLocation(); return; }
     navigator.geolocation.getCurrentPosition(
-      ({ coords }) => { if (run !== locationRun.current) return; setCoordinates({ latitude: coords.latitude, longitude: coords.longitude }); setLocation(`${coords.latitude.toFixed(5)}, ${coords.longitude.toFixed(5)}`); setScanStep("ready"); },
-      () => { if (run !== locationRun.current) return; setCoordinates(null); setLocation("Location permission is needed to submit"); setScanStep("ready"); },
+      ({ coords }) => { if (run !== locationRun.current) return; setCoordinates({ latitude: coords.latitude, longitude: coords.longitude }); setLocationSource("gps"); setLocation(`${coords.latitude.toFixed(5)}, ${coords.longitude.toFixed(5)}`); setScanStep("ready"); },
+      setApproximateLocation,
       { enableHighAccuracy: true, timeout: 8000 },
     );
   }
 
   function selectPhoto(file?: File) {
     if (!file) return;
+    const normalizedFile = normalizeImageFile(file);
     analysisRun.current += 1;
     locationRun.current += 1;
     setScanStep("ready");
     setPhoto(null);
     setPreview(null);
     setCoordinates(null);
+    setLocationSource(null);
     setLocation("Location not captured");
     setDetection(null);
-    const supportedTypes = new Set(["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"]);
-    if (!supportedTypes.has(file.type.toLowerCase())) {
+    setAnalysisError(null);
+    setSubmitError(null);
+    if (!normalizedFile) {
       setFileError("Use a JPEG, PNG, WebP, HEIC, or HEIF photo.");
       return;
     }
-    if (file.size === 0 || file.size > 8_000_000) {
+    if (normalizedFile.size === 0 || normalizedFile.size > 8_000_000) {
       setFileError("The photo must be smaller than 8 MB.");
       return;
     }
     setFileError(null);
-    setPhoto(file);
-    setPreview(URL.createObjectURL(file));
+    setPhoto(normalizedFile);
+    setPreview(URL.createObjectURL(normalizedFile));
     locate();
   }
 
@@ -199,12 +230,19 @@ export function RoadLensApp() {
     if (!photo) return;
     const run = ++analysisRun.current;
     setScanStep("analyzing");
+    setAnalysisError(null);
+    setSubmitError(null);
     const form = new FormData();
     form.set("image", photo);
     try {
       const response = await fetch("/api/analyze", { method: "POST", body: form });
       if (run !== analysisRun.current) return;
-      if (!response.ok) { setScanStep("unavailable"); return; }
+      if (!response.ok) {
+        const failure = await response.json().catch(() => null) as { error?: string } | null;
+        setAnalysisError(failure?.error || "The detector did not respond. Please try again.");
+        setScanStep("unavailable");
+        return;
+      }
       const result = await response.json() as { detections?: Array<{ confidence?: number; label?: string }> };
       const best = [...(result.detections ?? [])].sort((a, b) => (b.confidence ?? 0) - (a.confidence ?? 0))[0];
       if (!best || typeof best.confidence !== "number") { setDetection(null); setScanStep("noissue"); return; }
@@ -214,28 +252,45 @@ export function RoadLensApp() {
       const certainty: Detection["certainty"] = confidence >= 40 ? "probable" : "possible";
       setDetection({ confidence, severity, label, certainty });
       setScanStep(certainty === "probable" ? "found" : "possible");
-    } catch { if (run === analysisRun.current) setScanStep("unavailable"); }
+    } catch {
+      if (run === analysisRun.current) {
+        setAnalysisError("The detector could not be reached. Check your connection and try again.");
+        setScanStep("unavailable");
+      }
+    }
   }
 
   async function saveDetection() {
     if (!photo || !coordinates) return;
     setScanStep("saving");
+    setSubmitError(null);
     const form = new FormData();
     form.set("image", photo);
     form.set("latitude", String(coordinates.latitude));
     form.set("longitude", String(coordinates.longitude));
     form.set("severity", detection?.severity ?? "Medium");
-    const detectionDetail = detection ? `${detection.certainty === "probable" ? "Probable" : "Possible"} ${detection.label} · model screened` : "Road damage · awaiting review";
+    const locationNote = locationSource === "approximate" ? " · approximate location" : "";
+    const detectionDetail = detection ? `${detection.certainty === "probable" ? "Probable" : "Possible"} ${detection.label} · model screened${locationNote}` : `Road damage · awaiting review${locationNote}`;
+    form.set("street", locationSource === "gps" ? "Current road segment" : "Dushanbe · location needs verification");
     form.set("detail", detectionDetail);
     form.set("reviewRequested", "true");
     if (detection) form.set("confidence", String(detection.confidence));
     try {
       const response = await fetch("/api/reports", { method: "POST", body: form });
       const result = await response.json() as { report?: { id: string; status: "pending_review"; createdAt: string } };
-      if (!response.ok || !result.report) { if (response.status >= 500) setStorageReady(false); setScanStep("unavailable"); return; }
-      const issue: Issue = { id: result.report.id, street: "Current road segment", detail: detectionDetail, severity: detection?.severity ?? "Medium", confidence: detection?.confidence ?? null, confirmations: 0, status: result.report.status, createdAt: result.report.createdAt, position: { x: Math.max(4, Math.min(96, ((coordinates.longitude - 68.73) / 0.14) * 100)), y: Math.max(4, Math.min(96, 100 - ((coordinates.latitude - 38.52) / 0.11) * 100)) }, fresh: true };
+      if (!response.ok || !result.report) {
+        if (response.status >= 500) setStorageReady(false);
+        setSubmitError("The report was not submitted. Keep this screen open and try again.");
+        setScanStep("submiterror");
+        return;
+      }
+      const issue: Issue = { id: result.report.id, street: locationSource === "gps" ? "Current road segment" : "Dushanbe · location needs verification", detail: detectionDetail, severity: detection?.severity ?? "Medium", confidence: detection?.confidence ?? null, confirmations: 0, status: result.report.status, createdAt: result.report.createdAt, position: { x: Math.max(4, Math.min(96, ((coordinates.longitude - 68.73) / 0.14) * 100)), y: Math.max(4, Math.min(96, 100 - ((coordinates.latitude - 38.52) / 0.11) * 100)) }, fresh: true };
       setStorageReady(true); setIssues((current) => [issue, ...current]); setSelectedId(issue.id); closeScan();
-    } catch { setStorageReady(false); setScanStep("unavailable"); }
+    } catch {
+      setStorageReady(false);
+      setSubmitError("The report was not submitted. Check your connection and try again.");
+      setScanStep("submiterror");
+    }
   }
 
   return (
@@ -299,13 +354,14 @@ export function RoadLensApp() {
           <input ref={cameraRef} hidden type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" capture="environment" onChange={(event) => { const file = event.currentTarget.files?.[0]; event.currentTarget.value = ""; selectPhoto(file); }} />
           <input ref={uploadRef} hidden type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" onChange={(event) => { const file = event.currentTarget.files?.[0]; event.currentTarget.value = ""; selectPhoto(file); }} />
           {fileError && <div className="result-card warning"><span><CircleAlert /></span><div><strong>Photo cannot be used</strong><small>{fileError}</small></div></div>}
-          <div className="location-row"><LocateFixed /><div><strong>{scanStep === "locating" ? "Finding your location…" : location}</strong><small>Coordinates are attached only to this road report.</small></div><button onClick={locate}>Refresh</button></div>
+          <div className={`location-row ${locationSource === "approximate" ? "approximate" : ""}`}><LocateFixed /><div><strong>{scanStep === "locating" ? "Finding your location…" : location}</strong><small>{locationSource === "approximate" ? "GPS was unavailable. A reviewer must confirm the road location." : "Coordinates are attached only to this road report."}</small></div><button onClick={locate}>Refresh</button></div>
           {scanStep === "analyzing" && <div className="analysis-state"><span className="scanner" /><div><strong>Inspecting road surface</strong><small>Checking shape, depth cues, and pavement boundaries…</small></div></div>}
           {scanStep === "found" && detection && <div className="result-card"><span><Check /></span><div><strong>Probable {detection.label} detected</strong><small>{detection.severity} priority · {detection.confidence}% model confidence · review recommended</small></div></div>}
           {scanStep === "possible" && detection && <div className="result-card warning"><span><CircleAlert /></span><div><strong>Possible {detection.label}</strong><small>Low-confidence match ({detection.confidence}%) · submit for human review.</small></div></div>}
           {scanStep === "noissue" && <div className="result-card neutral"><span><Check /></span><div><strong>No confident road damage found</strong><small>This is not a guarantee. You can still submit the observation for human review.</small></div></div>}
-          {scanStep === "unavailable" && <div className="result-card warning"><span><CircleAlert /></span><div><strong>Automatic detection is unavailable</strong><small>Your photo is still here. Submit it for human review or try analysis again.</small></div></div>}
-          <div className="scan-footer"><span className="privacy-note"><ShieldCheck /> Evidence is available only to authorized reviewers</span>{["found", "possible", "noissue", "unavailable", "saving"].includes(scanStep) ? <Button disabled={!coordinates || scanStep === "saving"} onClick={saveDetection}>{scanStep === "saving" ? "Submitting…" : "Submit for human review"} <ChevronRight /></Button> : <Button disabled={!preview || scanStep === "analyzing" || scanStep === "locating"} onClick={analyze}>{scanStep === "analyzing" ? "Analyzing…" : "Analyze photo"}</Button>}</div>
+          {scanStep === "unavailable" && <div className="result-card warning actionable"><span><CircleAlert /></span><div><strong>Automatic detection is unavailable</strong><small>{analysisError || "Your photo is still here and can be reviewed by a person."}</small><button type="button" onClick={analyze}>Try automatic analysis again</button></div></div>}
+          {scanStep === "submiterror" && <div className="result-card error"><span><CircleAlert /></span><div><strong>Report not submitted</strong><small>{submitError}</small></div></div>}
+          <div className="scan-footer"><span className="privacy-note"><ShieldCheck /> Evidence is available only to authorized reviewers</span>{["found", "possible", "noissue", "unavailable", "saving", "submiterror"].includes(scanStep) ? <Button disabled={!coordinates || scanStep === "saving"} onClick={saveDetection}>{scanStep === "saving" ? "Submitting…" : scanStep === "submiterror" ? "Try submission again" : "Submit for human review"} <ChevronRight /></Button> : <Button disabled={!preview || scanStep === "analyzing" || scanStep === "locating"} onClick={analyze}>{scanStep === "analyzing" ? "Analyzing…" : "Analyze photo"}</Button>}</div>
         </section>
       </div>}
     </main>
